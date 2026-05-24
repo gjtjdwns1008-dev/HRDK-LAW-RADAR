@@ -146,7 +146,16 @@ def analyze_with_gemini(law_data_text):
         return []
     
     # AI 챌린지에 적합한 고성능 Pro 모델 사용
-    model = genai.GenerativeModel('gemini-3.5-flash')
+    # AI의 성격을 '창의성 0%, 팩트 100%'의 냉철한 분석가로 세팅
+    generation_config = {
+        "temperature": 0.0, # 할루시네이션 원천 차단 및 답변의 일관성 극대화
+        "response_mime_type": "application/json", # 앞뒤 군말 없이 완벽한 JSON 배열만 출력하도록 시스템 단에서 강제
+    }
+
+    model = genai.GenerativeModel(
+    model_name='gemini-3.5-flash',
+    generation_config=generation_config
+    )
     prompt = SYSTEM_PROMPT + f"\n\n[금일 수집된 법령 데이터]\n{law_data_text}"
     
     # 응답을 반드시 JSON 형식으로 반환하도록 설정 (응답 빈값 및 파싱 에러 완벽 해결)
