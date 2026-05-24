@@ -128,7 +128,7 @@ def analyze_with_gemini(law_data_text):
         return []
     
     # AI 챌린지에 적합한 고성능 Pro 모델 사용
-    model = genai.GenerativeModel('gemini-2.5-pro')
+    model = genai.GenerativeModel('gemini-3.5-flash')
     prompt = SYSTEM_PROMPT + f"\n\n[금일 수집된 법령 데이터]\n{law_data_text}"
     
     # 응답을 반드시 JSON 형식으로 반환하도록 설정 (응답 빈값 및 파싱 에러 완벽 해결)
