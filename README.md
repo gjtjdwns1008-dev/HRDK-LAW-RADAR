@@ -12,7 +12,7 @@
 4. **Structured Pipeline**: Gemini의 응답을 강제 JSON화 하여 무결성 확보 후, Google Sheets 마스터 DB로 실시간 전송
 
 ## ⚙️ 시스템 핵심 기술 (Tech Stack)
-- **LLM Engine**: Google Gemini 2.5 Pro (JSON Mode 적용)
+- **LLM Engine**: Google Gemini 3.5 Flash (JSON Mode 적용)
 - **Automation**: GitHub Actions (Cron Job 매일 스케줄링)
 - **Data Storage**: Google Sheets API (gspread)
 - **External API**: 법제처 Open API, 한국고용정보원(워크넷) Open API
