@@ -81,19 +81,29 @@ def update_google_sheet(sheet_client, data_list):
     except Exception as e:
         print(f"Master DB 시트 오류: {e}")
 
-# --- 3. 법제처 API 수집 ---
+# --- 3. 법제처 API 수집 (네트워크 방어 로직 추가) ---
 def fetch_today_laws():
     """당일 제/개정된 법령 XML을 호출합니다."""
-    # TODO: 법제처 API 스펙에 맞춘 상세 쿼리 조건 추가 가능
     url = f"https://www.law.go.kr/DRF/lawSearch.do?OC={LAW_API_KEY}&target=law&type=XML"
+    
+    # 공공기관 방화벽 통과를 위한 일반 웹 브라우저 위장 헤더
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
+    
     try:
-        res = requests.get(url)
-        # 로직 생략: 실제 환경에서는 XML에서 개정 내용 추출
-        # 여기서는 테스트용 Mockup 데이터를 전달합니다.
+        # timeout=15를 주어 서버 지연 시 15초간 끈기 있게 기다리도록 설정
+        res = requests.get(url, headers=headers, timeout=15)
+        res.raise_for_status() # HTTP 200 정상 응답이 아닐 경우 강제로 에러 발생시킴
+        
         raw_text = xmltodict.parse(res.text)
         return str(raw_text)[:3000] # 토큰 제한 방지용 슬라이싱
+        
+    except requests.exceptions.RequestException as e:
+        print(f"🚨 법제처 API 네트워크 호출 실패: {e}")
+        return ""
     except Exception as e:
-        print(f"법제처 API 호출 실패: {e}")
+        print(f"🚨 법제처 XML 데이터 파싱 실패: {e}")
         return ""
 
 # --- 4. 워크넷(고용24) API 매쉬업 (일자리 수요 확인) ---
