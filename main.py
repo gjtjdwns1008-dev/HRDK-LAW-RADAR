@@ -26,7 +26,8 @@ def get_gspread_client():
     return gspread.authorize(creds)
 
 def update_google_sheet(sheet_client, data_list):
-    doc = sheet_client.by_url(SHEET_URL)
+    # ★ 수정 포인트: open_by_url 로 변경!
+    doc = sheet_client.open_by_url(SHEET_URL) 
     today_str = datetime.now().strftime("%Y-%m-%d")
 
     # 1) 총괄현황표 로깅
@@ -36,12 +37,11 @@ def update_google_sheet(sheet_client, data_list):
     except Exception as e:
         print(f"총괄현황표 시트 오류: {e}")
 
-    # 2) Master DB 데이터 업데이트 (★ 증분 업데이트 - Upsert 적용)
+    # 2) Master DB 데이터 업데이트 (증분 업데이트 - Upsert 적용)
     try:
         master_sheet = doc.worksheet("국가기술자격 관련법령")
         
         # B열(인덱스 2)에 있는 모든 '고유키(unique_key)' 데이터를 리스트로 가져옵니다.
-        # 예: ['unique_key', '가축분뇨법시행령_별표11', '소방기본법_제10조', ...]
         existing_keys = master_sheet.col_values(2) 
 
         for item in data_list:
@@ -63,19 +63,14 @@ def update_google_sheet(sheet_client, data_list):
 
             if u_key and u_key in existing_keys:
                 # [Update] 기존에 존재하는 키면 해당 행(Row)을 찾아 덮어쓰기 (내용 갱신)
-                row_idx = existing_keys.index(u_key) + 1 # 시트 행은 1부터 시작하므로 +1
+                row_idx = existing_keys.index(u_key) + 1 
                 cell_range = f"A{row_idx}:J{row_idx}"
-                
-                # gspread update 메서드로 해당 범위 데이터 갱신
                 master_sheet.update(values=[row_data], range_name=cell_range)
                 print(f"🔄 [Update] 기존 조문 내용 갱신 완료: {u_key}")
             else:
                 # [Insert] 시트에 없는 완전 신규 법령 조문이면 맨 밑에 새로 추가
                 master_sheet.append_row(row_data)
                 print(f"🆕 [Insert] 신규 우대조항 추가 완료: {u_key}")
-                
-                # 방금 추가한 신규 키를 existing_keys 리스트에도 임시로 넣어서, 
-                # 한 번의 실행(Loop) 안에서 동일한 키가 또 나오면 중복 추가되지 않게 방어
                 existing_keys.append(u_key)
                 
     except Exception as e:
