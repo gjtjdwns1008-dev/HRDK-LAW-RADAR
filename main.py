@@ -34,15 +34,23 @@ def update_google_sheet(sheet_client, data_list):
         summary_sheet = doc.worksheet("총괄현황표")
         summary_sheet.append_row([today_str, len(data_list), "모니터링 성공", "AI+워크넷 매쉬업 완료"])
     except Exception as e:
-        print(f"총괄현황표 시트 오류 (시트가 존재하는지 확인): {e}")
+        print(f"총괄현황표 시트 오류: {e}")
 
-    # 2) Master DB 데이터 업데이트
+    # 2) Master DB 데이터 업데이트 (★ 증분 업데이트 - Upsert 적용)
     try:
         master_sheet = doc.worksheet("국가기술자격 관련법령")
+        
+        # B열(인덱스 2)에 있는 모든 '고유키(unique_key)' 데이터를 리스트로 가져옵니다.
+        # 예: ['unique_key', '가축분뇨법시행령_별표11', '소방기본법_제10조', ...]
+        existing_keys = master_sheet.col_values(2) 
+
         for item in data_list:
-            row = [
+            u_key = item.get("unique_key", "")
+            
+            # 구글 시트에 넣을 1행 분량의 데이터 세팅
+            row_data = [
                 today_str,
-                item.get("unique_key", ""),
+                u_key,
                 item.get("law_name", ""),
                 item.get("provision", ""),
                 ", ".join(item.get("related_qualifications", [])),
@@ -50,9 +58,26 @@ def update_google_sheet(sheet_client, data_list):
                 item.get("sapa_target", ""),
                 item.get("impact_level", ""),
                 item.get("insight", ""),
-                item.get("worknet_job_count", "0") # 워크넷 일자리 수요
+                item.get("worknet_job_count", "0")
             ]
-            master_sheet.append_row(row)
+
+            if u_key and u_key in existing_keys:
+                # [Update] 기존에 존재하는 키면 해당 행(Row)을 찾아 덮어쓰기 (내용 갱신)
+                row_idx = existing_keys.index(u_key) + 1 # 시트 행은 1부터 시작하므로 +1
+                cell_range = f"A{row_idx}:J{row_idx}"
+                
+                # gspread update 메서드로 해당 범위 데이터 갱신
+                master_sheet.update(values=[row_data], range_name=cell_range)
+                print(f"🔄 [Update] 기존 조문 내용 갱신 완료: {u_key}")
+            else:
+                # [Insert] 시트에 없는 완전 신규 법령 조문이면 맨 밑에 새로 추가
+                master_sheet.append_row(row_data)
+                print(f"🆕 [Insert] 신규 우대조항 추가 완료: {u_key}")
+                
+                # 방금 추가한 신규 키를 existing_keys 리스트에도 임시로 넣어서, 
+                # 한 번의 실행(Loop) 안에서 동일한 키가 또 나오면 중복 추가되지 않게 방어
+                existing_keys.append(u_key)
+                
     except Exception as e:
         print(f"Master DB 시트 오류: {e}")
 
