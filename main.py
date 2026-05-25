@@ -25,10 +25,26 @@ genai.configure(api_key=GEMINI_API_KEY)
 # 2. [오피셜 데이터 로드] 직능연 분석 기준 (하이브리드 전략 & 조문 분리)
 # ==========================================
 def load_reference_csv(file_name="2026년 국가기술자격 우대법령 정리본(중대재해처벌법 포함).csv"):
+    
+    # 가능한 인코딩 방식을 순서대로 시도합니다.
+    encodings = ['utf-8', 'utf-8-sig', 'cp949', 'euc-kr']
+    
+    for encoding in encodings:
+        try:
+            with open(file_path, mode='r', encoding=encoding) as f:
+                reader = csv.DictReader(f)
+                return list(reader)
+        except UnicodeDecodeError:
+            continue
+            
+    # 모든 방식이 실패하면 에러를 띄웁니다.
+    raise Exception(f"파일을 읽을 수 없습니다: {file_path}. 파일의 인코딩을 UTF-8로 변경해 주세요.")
+    
     """
     과거 직능연 기준 데이터를 사전에 로드합니다. 
     하나의 셀에 '제27조, 제28조'처럼 뭉쳐있는 조문을 분리하여 각각의 Key로 만듭니다.
     """
+    
     ref_dict = {}
     try:
         with open(file_name, mode='r', encoding='utf-8-sig') as f:
