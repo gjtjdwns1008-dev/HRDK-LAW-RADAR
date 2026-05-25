@@ -97,6 +97,8 @@ def update_google_sheet(sheet_client, data_list, total_reviewed_count):
 # ==========================================
 def fetch_recent_laws():
     """최근 30일간 제/개정된 법령 XML을 호출하고, (잘린텍스트, 전체건수)를 반환합니다."""
+    import re # 대소문자 무시 텍스트 추출을 위한 정규식 라이브러리
+    
     today_dt = datetime.now()
     past_dt = today_dt - timedelta(days=30)
     
@@ -113,20 +115,20 @@ def fetch_recent_laws():
         res = requests.get(url, headers=headers, timeout=15)
         res.raise_for_status() 
         
-        raw_dict = xmltodict.parse(res.text)
+        raw_xml_text = res.text
         
-        # 🌟 글자를 자르기 전에 원본 딕셔너리 구조에서 전체 건수(totalCnt)를 안전하게 추출합니다.
-        try:
-            search_result = raw_dict.get('lawSearch', {})
-            total_count = int(search_result.get('totalCnt', 0))
-            # 만약 totalCnt 태그가 없으면 law 리스트 개수로 차선책 카운팅
-            if total_count == 0 and 'law' in search_result:
-                laws = search_result['law']
-                total_count = len(laws) if isinstance(laws, list) else 1
-        except:
-            total_count = 0 # 파싱 실패 시 방어코드
+        # 🌟 수정 포인트: 딕셔너리 파싱 전에 날것의 텍스트에서 전체 건수를 무조건 찾아냅니다.
+        # 1. <totalCnt> 태그 안의 숫자를 대소문자 무시하고 추출
+        match = re.search(r'<totalCnt>(\d+)</totalCnt>', raw_xml_text, re.IGNORECASE)
+        if match:
+            total_count = int(match.group(1))
+        else:
+            # 2. totalCnt 태그가 아예 없다면 </law> 태그 개수를 직접 카운팅 (최후의 보루)
+            total_count = raw_xml_text.count("</law>") + raw_xml_text.count("</LAW>")
             
-        # 텍스트 데이터와 실측 전체 건수를 함께 리턴(Tuple)
+        raw_dict = xmltodict.parse(raw_xml_text)
+        
+        # 텍스트 데이터와 실측 전체 건수를 함께 리턴
         return str(raw_dict)[:3000], total_count
         
     except requests.exceptions.RequestException as e:
