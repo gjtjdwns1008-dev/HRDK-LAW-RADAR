@@ -29,17 +29,29 @@ def get_gspread_client():
     creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
     return gspread.authorize(creds)
 
-def update_google_sheet(sheet_client, data_list):
+def update_google_sheet(sheet_client, data_list, total_reviewed_count):
     # ★ 수정 포인트: open_by_url 로 변경!
     doc = sheet_client.open_by_url(SHEET_URL) 
     today_str = datetime.now().strftime("%Y-%m-%d")
 
-    # 1) 총괄현황표 로깅
+    # 1) 총괄현황표 로깅 (5열 구조 완벽 대응)
     try:
         summary_sheet = doc.worksheet("총괄현황표")
-        summary_sheet.append_row([today_str, len(data_list), "모니터링 성공", "AI+워크넷 매쉬업 완료"])
+        
+        # 담당자님께서 지정하신 5칸 구조에 맞춘 데이터 배열
+        summary_row = [
+            today_str,               # A열: 수집일자
+            total_reviewed_count,    # B열: 총 검토건수 (수집된 전체 법령 수)
+            len(data_list),          # C열: 연관 법령건수 (AI가 필터링한 유의미한 결과 수)
+            "정상 완료",             # D열: 모니터링 상태
+            "AI+워크넷 매쉬업 완료"  # E열: 실행 로그 및 비고
+        ]
+        
+        summary_sheet.append_row(summary_row)
+        print(f"📊 [총괄현황표] 업데이트 완료: {summary_row}")
+        
     except Exception as e:
-        print(f"총괄현황표 시트 오류: {e}")
+        print(f"🚨 총괄현황표 시트 오류: {e}")
 
     # 2) Master DB 데이터 업데이트 (증분 업데이트 - Upsert 적용)
     try:
@@ -78,8 +90,7 @@ def update_google_sheet(sheet_client, data_list):
                 existing_keys.append(u_key)
                 
     except Exception as e:
-        print(f"Master DB 시트 오류: {e}")
-
+        print(f"🚨 Master DB 시트 오류: {e}")
 # ==========================================
 # 3. 법제처 API 수집 (30일 백캐스팅 레이더 + 방화벽 우회)
 # ==========================================
