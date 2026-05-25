@@ -38,7 +38,7 @@ def update_google_sheet(sheet_client, data_list, total_reviewed_count):
     try:
         summary_sheet = doc.worksheet("총괄현황표")
         
-        # 담당자님께서 지정하신 5칸 구조에 맞춘 데이터 배열
+        # 5칸 구조에 맞춘 데이터 배열 (열 밀림 현상 완벽 방어)
         summary_row = [
             today_str,               # A열: 수집일자
             total_reviewed_count,    # B열: 총 검토건수 (수집된 전체 법령 수)
@@ -91,40 +91,50 @@ def update_google_sheet(sheet_client, data_list, total_reviewed_count):
                 
     except Exception as e:
         print(f"🚨 Master DB 시트 오류: {e}")
+
 # ==========================================
 # 3. 법제처 API 수집 (30일 백캐스팅 레이더 + 방화벽 우회)
 # ==========================================
 def fetch_recent_laws():
-    """최근 30일간 제/개정된 법령 XML을 호출합니다."""
-    # 오늘 날짜와 30일 전 날짜 계산 (YYYYMMDD 형식)
+    """최근 30일간 제/개정된 법령 XML을 호출하고, (잘린텍스트, 전체건수)를 반환합니다."""
     today_dt = datetime.now()
     past_dt = today_dt - timedelta(days=30)
     
     end_date = today_dt.strftime("%Y%m%d")
     start_date = past_dt.strftime("%Y%m%d")
     
-    # lsTrm(수집기간) 파라미터로 30일 범위를 지정하여 호출
     url = f"https://www.law.go.kr/DRF/lawSearch.do?OC={LAW_API_KEY}&target=law&type=XML&lsTrm={start_date}~{end_date}"
     
-    # 공공기관 방화벽 통과를 위한 일반 웹 브라우저 위장 헤더 (Updated!)
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     }
     
     try:
-        # timeout=15를 주어 서버 지연 시 15초간 끈기 있게 기다리도록 설정 (Updated!)
         res = requests.get(url, headers=headers, timeout=15)
-        res.raise_for_status() # HTTP 200 정상 응답이 아닐 경우 강제로 에러 발생시킴
+        res.raise_for_status() 
         
-        raw_text = xmltodict.parse(res.text)
-        return str(raw_text)[:3000] # 토큰 제한 방지용 슬라이싱 (필요 시 조정 가능)
+        raw_dict = xmltodict.parse(res.text)
+        
+        # 🌟 글자를 자르기 전에 원본 딕셔너리 구조에서 전체 건수(totalCnt)를 안전하게 추출합니다.
+        try:
+            search_result = raw_dict.get('lawSearch', {})
+            total_count = int(search_result.get('totalCnt', 0))
+            # 만약 totalCnt 태그가 없으면 law 리스트 개수로 차선책 카운팅
+            if total_count == 0 and 'law' in search_result:
+                laws = search_result['law']
+                total_count = len(laws) if isinstance(laws, list) else 1
+        except:
+            total_count = 0 # 파싱 실패 시 방어코드
+            
+        # 텍스트 데이터와 실측 전체 건수를 함께 리턴(Tuple)
+        return str(raw_dict)[:3000], total_count
         
     except requests.exceptions.RequestException as e:
         print(f"🚨 법제처 API 네트워크 호출 실패 (서버 불안정 또는 타임아웃): {e}")
-        return ""
+        return "", 0
     except Exception as e:
         print(f"🚨 법제처 XML 데이터 파싱 실패: {e}")
-        return ""
+        return "", 0
 
 # ==========================================
 # 4. 워크넷(고용24) API 매쉬업 (수요 폭발 교차 검증)
@@ -156,24 +166,18 @@ def analyze_with_gemini(law_data_text):
     if not law_data_text:
         return []
     
-    # AI 챌린지에 적합한 고성능 Pro 모델 사용
-    # AI의 성격을 '창의성 0%, 팩트 100%'의 냉철한 분석가로 세팅
     generation_config = {
-        "temperature": 0.0, # 할루시네이션 원천 차단 및 답변의 일관성 극대화
-        "response_mime_type": "application/json", # 앞뒤 군말 없이 완벽한 JSON 배열만 출력하도록 시스템 단에서 강제
+        "temperature": 0.0, 
+        "response_mime_type": "application/json", 
     }
 
     model = genai.GenerativeModel(
-    model_name='gemini-3.5-flash',
-    generation_config=generation_config
+        model_name='gemini-3.5-flash',
+        generation_config=generation_config
     )
     prompt = SYSTEM_PROMPT + f"\n\n[금일 수집된 법령 데이터]\n{law_data_text}"
     
-    # 응답을 반드시 JSON 형식으로 반환하도록 설정 (응답 빈값 및 파싱 에러 완벽 해결)
-    response = model.generate_content(
-        prompt,
-        generation_config={"response_mime_type": "application/json"}
-    )
+    response = model.generate_content(prompt)
     
     try:
         return json.loads(response.text)
@@ -186,9 +190,11 @@ def analyze_with_gemini(law_data_text):
 # ==========================================
 def main():
     print("1. [법제처] 최근 30일(백캐스팅) 제/개정 법령 API 수집 중...")
-    law_dict = fetch_recent_laws()
+    # 🌟 수정한 핵심 포인트: 수집 텍스트와 전체 건수를 분리해서 받아옵니다.
+    filtered_law_text, total_reviewed_count = fetch_recent_laws() 
     
-    if not law_dict:
+    if not filtered_law_text:
+        print("법령 수집 데이터가 없어 파이프라인을 중단합니다.")
         return
         
     print("2. [필터링] 기존 구글 시트 마스터 DB와 대조하여 순수 신규/누락 법령만 추출 중...")
@@ -196,15 +202,7 @@ def main():
     doc = client.open_by_url(SHEET_URL)
     master_sheet = doc.worksheet("국가기술자격 관련법령")
     
-    # B열(인덱스 2)에 있는 모든 '고유키'를 가져와서 집합(Set)으로 만듭니다 (검색 속도 향상)
     existing_keys_set = set(master_sheet.col_values(2))
-    
-    # API로 받아온 법령 목록 중 DB에 없는 것만 골라냅니다 (파이썬 코드로 텍스트 정제)
-    # (실제 법제처 XML 구조에 맞게 파싱하는 로직이 필요하지만, 여기서는 핵심 로직만 묘사합니다)
-    # new_laws_to_analyze = [law for law in law_dict if law['key'] not in existing_keys_set]
-    
-    # 토큰 절약을 위해 신규/누락 법령만 텍스트로 뭉쳐서 AI에게 전달
-    filtered_law_text = str(law_dict)[:3000] # 임시 슬라이싱 (실제 환경에선 정제된 new_laws_to_analyze 전달)
     
     print("3. [Gemini] 타법 개정 및 신규 누락 법령 AI 분석 (Ticketing Intensity) 도출 중...")
     analyzed_data = analyze_with_gemini(filtered_law_text)
@@ -222,7 +220,8 @@ def main():
         item["worknet_job_count"] = f"{job_count}건"
         
     print("5. [Google Sheets] 마스터 DB 업데이트 (Upsert) 중...")
-    update_google_sheet(client, analyzed_data)
+    # 🌟 수정한 핵심 포인트: 이제 세 번째 인자인 total_reviewed_count를 명확하게 넘겨줍니다!
+    update_google_sheet(client, analyzed_data, total_reviewed_count)
     
     print("✅ 타법개정/관보지연 완벽 방어 AI 파이프라인 가동 완료!")
 
