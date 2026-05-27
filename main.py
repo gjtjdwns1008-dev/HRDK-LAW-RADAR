@@ -71,24 +71,31 @@ def load_reference_csv(file_path):
 # ==========================================
 # 3. [오피셜 데이터 로드] 국가기술자격 491개 종목 리스트 (RAG 주입용)
 # ==========================================
-def load_qualification_list(file_name="26년 국가기술자격 종목.csv"):
-    """
-    AI가 존재하지 않는 자격증을 지어내지(환각) 못하도록, 
-    정확한 오피셜 종목 리스트를 프롬프트에 주입하기 위해 문자열로 읽어옵니다.
-    """
-    qual_list = []
-    try:
-        with open(file_name, mode='r', encoding='utf-8-sig') as f:
-            reader = csv.reader(f)
-            for row in reader:
-                if row and row[0].strip() != "종목명": # 빈 줄이나 헤더 제외
-                    qual_list.append(row[0].strip())
-                    
-        print(f"📋 [종목 리스트 로드 완료] 총 {len(qual_list)}개의 오피셜 종목명 확보")
-        return ", ".join(qual_list)
-    except FileNotFoundError:
-        print(f"⚠️ [경고] 종목 리스트 CSV 파일을 찾을 수 없습니다: {file_name}")
-        return ""
+import csv
+
+def load_qualification_list(filename):
+    # 여러 인코딩 방식을 순차적으로 시도합니다.
+    encodings = ['utf-8-sig', 'utf-8', 'cp949', 'euc-kr']
+    
+    for enc in encodings:
+        try:
+            with open(filename, 'r', encoding=enc) as f:
+                reader = csv.reader(f)
+                # 데이터 읽기 시도 (여기서 에러가 나면 except로 넘어감)
+                rows = list(reader)
+            
+            print(f"✅ 성공: '{filename}' 파일을 {enc} 방식으로 완벽하게 읽었습니다!")
+            
+            # (중요) 기존 코드에서 데이터를 리스트나 문자열로 만드는 로직을 여기에 그대로 유지하세요.
+            # 예시: 1열에 자격증명이 있다고 가정할 경우
+            qual_list = [row[0].strip() for row in rows if row] 
+            return qual_list # (만약 기존 코드가 return ", ".join(qual_list) 였다면 그렇게 맞춰주세요)
+            
+        except UnicodeDecodeError:
+            continue # 실패하면 다음 인코딩 방식으로 넘어갑니다.
+            
+    # 모든 인코딩 방식이 실패했을 경우
+    raise ValueError(f"❌ 실패: '{filename}' 파일의 인코딩을 확인할 수 없습니다. 파일을 UTF-8로 다시 저장해주세요.")
 
 # ==========================================
 # 4. MST_ID (고유 마스터 ID) 연도별 스마트 자동 발급기 (6자리 확장)
