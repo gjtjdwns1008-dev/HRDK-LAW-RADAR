@@ -39,54 +39,10 @@ def load_reference_csv(file_path):
     # 모든 방식이 실패하면 에러를 띄웁니다.
     raise Exception(f"파일을 읽을 수 없습니다: {file_path}. 파일의 인코딩을 UTF-8로 변경해 주세요.")
 
-    # [기존 코드] 직능연 오피셜 파일 (우대법령 정리본)을 불러오는 부분
-    reference_dict = load_reference_csv('2026년 국가기술자격 우대법령 정리본.csv')  # 파일명이나 함수명은 실제 코드에 맞게 확인하세요.
-
-    # =====================================================================
-    # 🌟 [여기서부터 추가할 코드] 리스트를 다시 '우대법령+조문내역' Key를 가진 딕셔너리로 변환
-    # =====================================================================
-    if isinstance(reference_dict, list):
-        reference_dict = {
-        f"{row.get('우대법령', '')} {row.get('조문내역', '')}".strip(): row 
-        for row in reference_dict
-        }
-    # =====================================================================
-    
-    # [기존 코드] 이 아래부터는 원래 있던 코드가 계속됩니다...
-    
-    """
-    과거 직능연 기준 데이터를 사전에 로드합니다. 
-    하나의 셀에 '제27조, 제28조'처럼 뭉쳐있는 조문을 분리하여 각각의 Key로 만듭니다.
-    """
-    
-    ref_dict = {}
-    try:
-        with open(file_name, mode='r', encoding='utf-8-sig') as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                law_name = row.get('우대법령', '').strip()
-                # 🌟 조문내역에 쉼표가 있을 경우 쪼개서 리스트로 만듦
-                raw_provisions = row.get('조문내역', '').split(',')
-                
-                for p in raw_provisions:
-                    provision = p.strip()
-                    if law_name and provision:
-                        # 띄어쓰기 차이로 인한 미스매치를 막기 위해 공백 완전 제거
-                        u_key = f"{law_name}_{provision}".replace(" ", "")
-                        ref_dict[u_key] = {
-                            "preference_type": row.get('우대분류', '').strip(),
-                            "sapa_target": row.get('중처법대상', '').strip()
-                        }
-        print(f"📖 [참고용 CSV 로드 완료] 분리된 조문 기준 총 {len(ref_dict)}개의 오피셜 키 확보")
-    except FileNotFoundError:
-        print(f"⚠️ [경고] 오피셜 기준 CSV 파일을 찾을 수 없습니다: {file_name}")
-    return ref_dict
 
 # ==========================================
 # 3. [오피셜 데이터 로드] 국가기술자격 491개 종목 리스트 (RAG 주입용)
 # ==========================================
-import csv
-
 def load_qualification_list(filename):
     # 여러 인코딩 방식을 순차적으로 시도합니다.
     encodings = ['utf-8-sig', 'utf-8', 'cp949', 'euc-kr']
@@ -274,7 +230,20 @@ def analyze_with_gemini(law_data_text, qual_list_str):
 # ==========================================
 def main():
     print("1. [데이터 로드] 직능연 오피셜 파일 및 종목 리스트 로드 중...")
+    
+    # 리스트 형태로 우선 불러옵니다.
     reference_dict = load_reference_csv("2026년 국가기술자격 우대법령 정리본(중대재해처벌법 포함).csv")
+    
+    # =====================================================================
+    # 🌟 [위치 수정됨] 여기서 리스트를 다시 '우대법령+조문내역' Key를 가진 딕셔너리로 변환합니다!
+    # =====================================================================
+    if isinstance(reference_dict, list):
+        reference_dict = {
+            f"{row.get('우대법령', '')} {row.get('조문내역', '')}".strip(): row 
+            for row in reference_dict
+        }
+    # =====================================================================
+
     qual_list_str = load_qualification_list("26년 국가기술자격 종목.csv") 
 
     print("2. [법제처 API] 최근 제/개정 법령 수집 중...")
@@ -294,8 +263,8 @@ def main():
         matched_official_key = next((k for k in reference_dict.keys() if u_key_clean in k or k in u_key_clean), None)
         
         if matched_official_key:
-            official_pref = reference_dict[matched_official_key]["preference_type"]
-            official_sapa = reference_dict[matched_official_key]["sapa_target"]
+            official_pref = reference_dict[matched_official_key].get("preference_type", "")
+            official_sapa = reference_dict[matched_official_key].get("sapa_target", "")
             
             # 🌟 핵심: 직능연 과거 기준과 AI의 현재 판단이 다를 경우, AI의 판단을 우선하고 인사이트에 알림 추가
             if official_pref and ai_pref and (official_pref != ai_pref):
