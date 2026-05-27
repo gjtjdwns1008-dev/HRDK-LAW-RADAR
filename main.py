@@ -25,26 +25,19 @@ genai.configure(api_key=GEMINI_API_KEY)
 # 2. [오피셜 데이터 로드] 직능연 분석 기준 (하이브리드 전략 & 조문 분리)
 # ==========================================
 def load_reference_csv(file_path):
-    """
-    엑셀이 어떤 인코딩으로 저장하든 자동으로 맞춰서 읽어오는 강력한 함수
-    """
-    # 파이썬이 시도해 볼 인코딩 후보들 (UTF-8 먼저, 안되면 한국어 윈도우용 cp949)
-    encodings_to_try = ['utf-8', 'utf-8-sig', 'cp949', 'euc-kr']
+    # 가능한 인코딩 방식을 순서대로 시도합니다.
+    encodings = ['utf-8', 'utf-8-sig', 'cp949', 'euc-kr']
     
-    for encoding in encodings_to_try:
+    for encoding in encodings:
         try:
             with open(file_path, mode='r', encoding=encoding) as f:
                 reader = csv.DictReader(f)
-                data = list(reader)
-                # 성공하면 로그에 어떤 인코딩으로 성공했는지 출력해줍니다.
-                print(f"✅ 성공: '{file_path}' 파일을 {encoding} 방식으로 완벽하게 읽었습니다!")
-                return data
+                return list(reader)
         except UnicodeDecodeError:
-            # 해당 인코딩으로 실패하면 조용히 다음 후보로 넘어갑니다.
             continue
             
-    # 모든 방법을 다 썼는데도 안 될 경우의 안전장치
-    raise Exception(f"❌ 치명적 에러: '{file_path}' 파일을 읽을 수 없습니다.")
+    # 모든 방식이 실패하면 에러를 띄웁니다.
+    raise Exception(f"파일을 읽을 수 없습니다: {file_path}. 파일의 인코딩을 UTF-8로 변경해 주세요.")
 
     
     """
