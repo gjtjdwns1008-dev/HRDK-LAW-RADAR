@@ -167,10 +167,11 @@ def update_google_sheet(sheet_client, data_list, total_reviewed_count):
         print(f"🚨 Master DB 시트 오류: {e}")
 
 # ==========================================
-# 6. 법제처 API 수집 (30일 백캐스팅)
+# 6. 법제처 API 수집 (30일 백캐스팅) + 자동 재시도 로직 적용
 # ==========================================
 def fetch_recent_laws():
     import re 
+    import time # 시간 지연을 위해 추가
     today_dt = datetime.now()
     past_dt = today_dt - timedelta(days=30)
     end_date = today_dt.strftime("%Y%m%d")
@@ -179,19 +180,28 @@ def fetch_recent_laws():
     url = f"https://www.law.go.kr/DRF/lawSearch.do?OC={LAW_API_KEY}&target=law&type=XML&lsTrm={start_date}~{end_date}"
     headers = {"User-Agent": "Mozilla/5.0"}
     
-    try:
-        res = requests.get(url, headers=headers, timeout=15)
-        res.raise_for_status() 
-        raw_xml_text = res.text
-        
-        match = re.search(r'<totalCnt>(\d+)</totalCnt>', raw_xml_text, re.IGNORECASE)
-        total_count = int(match.group(1)) if match else raw_xml_text.count("</law>") + raw_xml_text.count("</LAW>")
-        raw_dict = xmltodict.parse(raw_xml_text)
-        return str(raw_dict)[:3000], total_count # 토큰 최적화를 위해 일부만 슬라이싱
-    except Exception as e:
-        print(f"🚨 법제처 API 수집 실패: {e}")
-        return "", 0
-
+    max_retries = 3  # 최대 3번까지 재시도
+    
+    for attempt in range(max_retries):
+        try:
+            res = requests.get(url, headers=headers, timeout=20) # 타임아웃도 20초로 살짝 늘림
+            res.raise_for_status() 
+            raw_xml_text = res.text
+            
+            match = re.search(r'<totalCnt>(\d+)</totalCnt>', raw_xml_text, re.IGNORECASE)
+            total_count = int(match.group(1)) if match else raw_xml_text.count("</law>") + raw_xml_text.count("</LAW>")
+            raw_dict = xmltodict.parse(raw_xml_text)
+            return str(raw_dict)[:3000], total_count
+            
+        except requests.exceptions.ConnectionError as e:
+            print(f"⚠️ [경고] 법제처 서버 응답 없음. ({attempt + 1}/{max_retries}회 재시도 중...) 5초 후 다시 시도합니다.")
+            time.sleep(5) # 5초 대기 후 다시 시도
+        except Exception as e:
+            print(f"🚨 법제처 API 수집 완전 실패: {e}")
+            break # 연결 오류가 아닌 다른 치명적 오류면 반복문 탈출
+            
+    return "", 0
+    
 # ==========================================
 # 7. 워크넷(고용24) API
 # ==========================================
