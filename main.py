@@ -300,5 +300,31 @@ def main():
     
     print("✅ 타법개정 방어 & 스마트 크로스체크 AI 파이프라인 완벽 가동!")
 
+# ==========================================
+# 10. [신규 추가] 시스템 에러 발생 시 구글 시트에 자동 기록
+# ==========================================
+def log_fatal_error_to_sheet(error_msg):
+    try:
+        client = get_gspread_client()
+        doc = client.open_by_url(SHEET_URL)
+        summary_sheet = doc.worksheet("총괄현황표")
+        
+        today_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        # 상태 열에 '❌ 시스템 에러', 비고 열에 '에러 상세 원인'을 기록
+        error_row = [today_str, "0", "0", "❌ 시스템 에러 (실패)", str(error_msg)[:1000]]
+        
+        summary_sheet.append_row(error_row)
+        print("✅ [Error Log] 에러 내용이 구글 시트 '총괄현황표'에 성공적으로 기록되었습니다.")
+    except Exception as e:
+        print(f"🚨 [Fatal] 에러 내용을 구글 시트에 기록하는 것조차 실패했습니다: {e}")
+
+# ==========================================
+# 실행부 (안전망 Try-Except 적용)
+# ==========================================
 if __name__ == "__main__":
-    main()
+    try:
+        main()  # 메인 파이프라인 정상 실행
+    except Exception as e:
+        # 실행 중 예상치 못한 치명적 에러가 발생하면 여기서 낚아챔
+        print(f"🚨 [시스템 중단 에러 발생] {e}")
+        log_fatal_error_to_sheet(e)  # 구글 시트에 에러 내용 전송
