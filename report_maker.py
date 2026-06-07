@@ -20,9 +20,10 @@ def get_column_letter(n):
 # ==========================================
 # 1. 구글 시트 마스터 DB 적재 (통합 Upsert 엔진)
 # ==========================================
-def upload_to_google_sheet(total_len, target_laws, target_date=TARGET_DATE):
-    """[HRDK LAW-RADAR 오버홀] 국가기술자격 관련 법령 전체 통합 Upsert"""
-    if not GCP_SERVICE_ACCOUNT_JSON or not GOOGLE_SHEET_URL:
+# 🌟 [고도화] 관제용 상태(status)와 로그(log) 파라미터 기본값 추가
+def upload_to_google_sheet(total_len, target_laws, target_date=TARGET_DATE, status="🟢 정상 작동", log="특이사항 없음"):
+    """[HRDK LAW-RADAR 오버홀] 국가기술자격 관련 법령 전체 통합 Upsert 및 총괄현황 관제 모니터링 기록"""
+    if not GCP_SA_JSON or not GOOGLE_SHEET_ID:
         print("  ⚠️ 구글 시트 설정 정보가 없어 적재를 건너뜁니다.")
         return
 
@@ -35,16 +36,27 @@ def upload_to_google_sheet(total_len, target_laws, target_date=TARGET_DATE):
         spreadsheet = client.open_by_key(GOOGLE_SHEET_URL)
 
         # 1) 총괄현황표 로깅
+        # 🌟 [요구사항 반영] 총괄현황표 실시간 타임스탬프 관제 로깅
         try:
             summary_sheet = spreadsheet.worksheet("총괄현황표")
+            
+            # 한국 시간(KST) 기준으로 초 단위까지 정확하게 구하기
+            from datetime import datetime, timezone, timedelta
+            current_now = datetime.now(timezone(timedelta(hours=9)))
+            current_time_str = current_now.strftime("%Y-%m-%d %H:%M:%S")
+            
+            # 확장된 5대 통합 헤더 규격에 맞춰 한 줄 적재
             summary_row = [
-                f"{target_date[:4]}년_{target_date[4:6]}월_{target_date[6:]}일",
-                total_len,
-                len(target_laws) # 관련 법령 총 건수
+                current_time_str,    # 1. 수집일자 (초 단위 시간 포함 🌟)
+                total_len,           # 2. 총 검토건수
+                len(target_laws),    # 3. 연관 법령건수
+                status,              # 4. 모니터링 상태 (정상/에러 표기 🌟)
+                log                  # 5. 실행 로그 및 비고 (상세 내용 표기 🌟)
             ]
             summary_sheet.append_row(summary_row)
+            print(f"  📊 [총괄현황표 관제 기록 성공] 상태: {status}")
         except Exception as e:
-            print(f"  ⚠️ 총괄현황표 기록 실패: {e}")
+            print(f"  ⚠️ 총괄현황표 관제 데이터 기록 실패: {e}")
 
         # 2) 🌟 핵심 엔진: 하나의 시트("국가기술자격 관련법령")에 전부 Upsert
         if target_laws:
