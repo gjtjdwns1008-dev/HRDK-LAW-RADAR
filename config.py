@@ -12,6 +12,7 @@ WEBHOOK_URL = "https://hook.eu1.make.com/okarw4rcy9yusgxj44ogornxbdj8r51u"
 # [V27 신규] 구글 시트 직접 제어용 환경 변수
 GCP_SA_JSON = os.environ.get("GCP_SA_JSON")
 GOOGLE_SHEET_ID = os.environ.get("GOOGLE_SHEET_ID")
+WORKNET_API_KEY = os.environ.get("WORKNET_API_KEY")
 
 # ==========================================
 # 2. 날짜 및 공통 변수 설정
