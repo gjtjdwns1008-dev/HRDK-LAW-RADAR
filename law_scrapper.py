@@ -13,7 +13,12 @@ from config import LAW_API_KEY, TARGET_DATE
 # ==========================================
 HEADERS = {'User-Agent': 'Mozilla/5.0'}
 session = requests.Session()
-retry = Retry(connect=3, backoff_factor=0.5)
+retry = Retry(
+    total=5, 
+    backoff_factor=2, 
+    status_forcelist=[500, 502, 503, 504],
+    allowed_methods=["GET"]
+)
 adapter = HTTPAdapter(max_retries=retry)
 session.mount('http://', adapter)
 session.mount('https://', adapter)
