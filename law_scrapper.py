@@ -5,10 +5,11 @@ import re
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
+# 🌟 수정: QNET_CERTS가 config.py로 이동했으므로 import에서 삭제합니다.
 from config import LAW_API_KEY, TARGET_DATE
 
 # ==========================================
-# 통신 안정성 세팅 (서버 튕김 방지)
+# 통신 안정성 세팅 (기존과 동일)
 # ==========================================
 HEADERS = {'User-Agent': 'Mozilla/5.0'}
 session = requests.Session()
@@ -18,23 +19,21 @@ session.mount('http://', adapter)
 session.mount('https://', adapter)
 
 # ==========================================
-# 마크다운 정제 함수
+# 마크다운 정제 함수 (기존과 동일)
 # ==========================================
 def clean_to_markdown(title, content):
-    """[V28 핵심] 밋밋한 텍스트를 마크다운으로 정제하여 AI의 가독성을 높입니다."""
     if not content: return ""
     text = content.strip()
     text = re.sub(r'(①|②|③|④|⑤|⑥|⑦|⑧|⑨|⑩)', r'\n- **\1**', text)
     return f"### 📜 {title}\n{text}\n"
 
 # ==========================================
-# 법령 수집 메인 함수
+# 법령 수집 메인 함수 (소관부처 추출 로직 포함)
 # ==========================================
 def get_base_laws(target_date=TARGET_DATE):
-    """특정 일자의 법령을 수집하고, 프리필터링 및 텍스트 정제를 수행합니다."""
+    """특정 일자의 법령을 수집하고, 소관부처 정보와 프리필터링을 수행합니다."""
     all_laws_dict = {}
     
-    # 🚨 AI가 볼 필요도 없는 잡초 키워드들!
     SKIP_KEYWORDS = ['직제', '행정기구', '사무분장', '분장규정', '위원회', '정원', '위임전결', '선거', '복무규정', '인사규정', '여비규정', '표창규칙']
     
     for target_type in ['law', 'histlaw']:
@@ -49,37 +48,36 @@ def get_base_laws(target_date=TARGET_DATE):
                 if not law_nodes: break
                 
                 for law in law_nodes:
-                    # 🌟 1. 변수 이름을 law 로 통일! (elem 아님)
                     law_id = law.findtext('법령일련번호', '')
-                    law_name = law.findtext('법령명한글', '').strip()  # 🌟 완벽한 해결책!
+                    law_name = law.findtext('법령명한글', '').strip()
                     enforce_date = law.findtext('시행일자', '')
-
-                    enforce_date = law.findtext('시행일자', '')
-
-                    # 🌟 2. 나중에 쓰기 위해 공포번호, 공포일자 재료 챙기기!
+                    
+                    # 🌟 [소관부처 수집] API에서 제공하는 소관부처명 추출
+                    ministry = law.findtext('소관부처명', '알 수 없음').strip()
+                    
                     prom_num_raw = law.findtext('공포번호', '')
-                    prom_num = re.sub(r'\D', '', prom_num_raw) # 숫자만 쏙 빼기
+                    prom_num = re.sub(r'\D', '', prom_num_raw)
                     prom_date = law.findtext('공포일자', '').strip()
                     
                     if not law_id or law_name in all_laws_dict: continue
                     
-                    # 🌟 3. 임시 기본 링크 세팅 (조문별 상세 링크는 brain_gemini.py에서 조립)
                     base_law_link = f"https://www.law.go.kr/법령/{law_name}"
 
-                    # 💡 [프리필터링 가동]
+                    # 프리필터링
                     if any(k in law_name for k in SKIP_KEYWORDS):
                         all_laws_dict[law_name] = {
                             "법령명": law_name, 
-                            "시행일자": enforce_date, 
-                            "공포번호": prom_num,  # 🌟 챙겨둔 재료 저장
-                            "공포일자": prom_date,  # 🌟 챙겨둔 재료 저장
+                            "시행일자": enforce_date,
+                            "소관부처": ministry, # 🌟 스킵 법령에도 부처 표기
+                            "공포번호": prom_num, 
+                            "공포일자": prom_date, 
                             "원본": "조직/기구 관련 법령으로 AI 분석 생략", 
                             "링크": base_law_link,
                             "스킵여부": True 
                         }
                         continue
 
-                    # --- 진짜 분석해야 할 법령 디테일 수집 ---
+                    # 디테일 정보 수집
                     detail_url = f"https://www.law.go.kr/DRF/lawService.do?OC={LAW_API_KEY}&target={target_type}&MST={law_id}&type=XML"
                     detail_response = session.get(detail_url, headers=HEADERS, timeout=15)
                     detail_root = ET.fromstring(detail_response.text)
@@ -118,12 +116,13 @@ def get_base_laws(target_date=TARGET_DATE):
                     
                     full_text = full_text[:15000]
                     
-                    # 🌟 4. 정상 법령 딕셔너리에 재료 추가
+                    # 🌟 4. 정상 법령 딕셔너리에 소관부처 정보 추가 적재
                     all_laws_dict[law_name] = {
                         "법령명": law_name, 
                         "시행일자": enforce_date, 
-                        "공포번호": prom_num,  # 🌟 챙겨둔 재료 저장
-                        "공포일자": prom_date,  # 🌟 챙겨둔 재료 저장
+                        "소관부처": ministry,   # 🌟 핵심: 소관부처 정보 주입
+                        "공포번호": prom_num, 
+                        "공포일자": prom_date, 
                         "원본": full_text, 
                         "링크": base_law_link,
                         "스킵여부": False 
