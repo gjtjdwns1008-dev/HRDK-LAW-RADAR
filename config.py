@@ -10,8 +10,8 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 WEBHOOK_URL = "https://hook.eu1.make.com/okarw4rcy9yusgxj44ogornxbdj8r51u"
 
 # [V27 신규] 구글 시트 직접 제어용 환경 변수
-GCP_SA_JSON = os.environ.get("GCP_SA_JSON")
-GOOGLE_SHEET_ID = os.environ.get("GOOGLE_SHEET_ID")
+GCP_SERVICE_ACCOUNT_JSON = os.environ.get("GCP_SERVICE_ACCOUNT_JSON")
+GOOGLE_SHEET_URL = os.environ.get("GOOGLE_SHEET_URL")
 WORKNET_API_KEY = os.environ.get("WORKNET_API_KEY")
 
 # ==========================================
@@ -49,6 +49,7 @@ COLUMNS = [
     "검토 필요", 
     "검토 사유", 
     "조문별 다이렉트 링크"
+    "워크넷_실시간_구인건수" # 🌟 [신설] 맨 마지막 17번째 컬럼(Q열)으로 추가!
 ]
 
 # ==========================================
