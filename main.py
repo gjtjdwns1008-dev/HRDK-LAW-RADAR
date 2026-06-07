@@ -28,23 +28,27 @@ def main():
     # 🌟 신설: AI에게 먹일 '국가기술자격 종목 리스트'를 CSV에서 텍스트로 미리 읽어옵니다.
     qnet_certs_text = load_qualification_list(QUALIFICATION_CSV_PATH)
 
-    # ==========================================
+# ==========================================
     # 1. 법령 수집 (프리필터링 포함)
     # ==========================================
     laws = get_base_laws()
+    
+    # 🌟 [신설] 법제처 서버 응답 불능(None) 시 방어 로직
+    if laws is None:
+        print(f"❌ [결정적 오류] 법제처 API 서버 통신 완전 실패. 시스템을 안전하게 종료합니다.")
+        print(f"  ⚠️ 잘못된 '0건 리포트' 발송 및 마스터 DB 훼손을 방지하기 위해 웹훅 전송을 차단했습니다.")
+        return # 깃허브 액션 정상 종료 (오발송 원천 차단)
+
+    # 수집은 성공했으나 진짜로 오늘 시행 법령이 없는 경우(정상 0건)
     if not laws:
         print(f"  ℹ️ {TARGET_DATE} 시행되는 법령이 없습니다. (0건 기록 및 빈 리포트 전송)")
         
-        # 🌟 [수정] 통합 바구니인 'target_laws' 하나만 전달하면 됩니다!
-        upload_to_google_sheet(0, []) 
-        
-        # 엑셀 보고서도 통합 바구니 하나만 전달
+        # 통합 바구니 양식에 맞춰 인자 전달
+        upload_to_google_sheet(0, [])
         empty_excel = create_excel_report([])
         
-        # 🌟 [수정] send_webhook_with_file 함수도 바구니 1개 기준에 맞게 0을 추가하여 호출
-        # (전체건수: 0, 관련법령건수: 0, 추가여분: 0)
+        # 메이크닷컴 에러 방지용 빈 파일 전송
         send_webhook_with_file(empty_excel, 0, 0, 0)
-        
         return # 종료
 
     # 연관/단순 구분을 없애고 'target_laws' 하나로 통합!
