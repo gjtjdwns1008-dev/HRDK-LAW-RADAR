@@ -35,11 +35,14 @@ def main():
     if not laws:
         print(f"  ℹ️ {TARGET_DATE} 시행되는 법령이 없습니다. (0건 기록 및 빈 리포트 전송)")
         
-        # 구글 시트 적재 함수 호출 (통합 바구니 1개 전달)
-        upload_to_google_sheet(0, [])
+        # 🌟 [수정] 통합 바구니인 'target_laws' 하나만 전달하면 됩니다!
+        upload_to_google_sheet(0, []) 
+        
+        # 엑셀 보고서도 통합 바구니 하나만 전달
         empty_excel = create_excel_report([])
         
-        # webhook 함수는 원래 (전체, high, simple) 3개를 받도록 되어 있으므로 simple 자리에 0을 넣습니다.
+        # 🌟 [수정] send_webhook_with_file 함수도 바구니 1개 기준에 맞게 0을 추가하여 호출
+        # (전체건수: 0, 관련법령건수: 0, 추가여분: 0)
         send_webhook_with_file(empty_excel, 0, 0, 0)
         
         return # 종료
