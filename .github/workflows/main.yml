@@ -30,7 +30,7 @@ jobs:
         LAW_API_KEY: ${{ secrets.LAW_API_KEY }}
         GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
-        GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
-        GCP_SA_JSON: ${{ secrets.GCP_SA_JSON }}
+        GOOGLE_SHEET_URL: ${{ secrets.GOOGLE_SHEET_URL }}
+        GCP_SERVICE_ACCOUNT_JSON: ${{ secrets.GCP_SERVICE_ACCOUNT_JSON }}
         WORKNET_API_KEY: ${{ secrets.WORKNET_API_KEY }}
       run: python main.py
