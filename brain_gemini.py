@@ -4,7 +4,7 @@ import time
 from google import genai
 from google.genai import types
 
-from config import GEMINI_API_KEY, QNET_CERTS
+from config import GEMINI_API_KEY
 
 # 🚨 [V29 최신 방식] 옛날 방식인 genai.configure는 완전히 사라졌습니다!
 client = genai.Client(api_key=GEMINI_API_KEY)
@@ -26,7 +26,7 @@ def generate_new_law_link(law_name, enforce_date, prom_num, prom_date, article_n
     return f"https://www.law.go.kr/법령/{law_name}"
 
 
-def run_ai_analysis(law, attempt_count=5):
+def run_ai_analysis(law, qnet_certs_text, attempt_count=5):
     # ==========================================
     # 🌟 [개편된 프롬프트] Track 1(정책) & Track 2(국민) 투트랙 입체 분석 모드
     # ==========================================
@@ -36,7 +36,7 @@ def run_ai_analysis(law, attempt_count=5):
 
     입력되는 법령이 다음 491개 국가기술자격 종목 중 어느 것과 연관되는지 파악하십시오.
     [국가기술자격 종목 리스트]
-    {QNET_CERTS}
+    {qnet_certs_text}   # <-- 밖에서 받아온 텍스트가 여기에 쏙 들어갑니다!
 
     ### 🎯 [핵심 분류 기준 (반드시 숙지)]
 
@@ -149,6 +149,7 @@ def run_ai_analysis(law, attempt_count=5):
             # ==========================================
             law_info = {
                 "시행일자": law["시행일자"],
+                "소관부처": law.get("소관부처", ""),  # <-- 스크래퍼가 챙겨온 부처명 꽂아넣기!
                 "법령명": law["법령명"],
                 "연관성_판별": data.get("연관성_판별", "해당없음"),  # (라우팅용 핵심 변수)
                 "관련 종목": data.get("종목", ""),
