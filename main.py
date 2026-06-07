@@ -5,7 +5,7 @@ from brain_gemini import run_ai_analysis
 from report_maker import upload_to_google_sheet, create_excel_report, send_webhook_with_file
 
 def main():
-    print(f"🚀 [법령 모니터링 V29] {TARGET_DATE} 데이터 수집 및 분석 시작...\n" + "="*50)
+    print(f"🚀 [HRDK LAW-RADAR] {TARGET_DATE} 데이터 수집 및 분석 시작...\n" + "="*50)
     start_time = time.time()
 
 # ==========================================
