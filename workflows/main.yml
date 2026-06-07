@@ -32,5 +32,5 @@ jobs:
         WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
         GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
         GCP_SA_JSON: ${{ secrets.GCP_SA_JSON }}
-        
+        WORKNET_API_KEY: ${{ secrets.WORKNET_API_KEY }}
       run: python main.py
