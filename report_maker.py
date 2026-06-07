@@ -23,7 +23,7 @@ def get_column_letter(n):
 # 🌟 [고도화] 관제용 상태(status)와 로그(log) 파라미터 기본값 추가
 def upload_to_google_sheet(total_len, target_laws, target_date=TARGET_DATE, status="🟢 정상 작동", log="특이사항 없음"):
     """[HRDK LAW-RADAR 오버홀] 국가기술자격 관련 법령 전체 통합 Upsert 및 총괄현황 관제 모니터링 기록"""
-    if not GCP_SA_JSON or not GOOGLE_SHEET_ID:
+    if not GCP_SERVICE_ACCOUNT_JSON or not GOOGLE_SHEET_URL:
         print("  ⚠️ 구글 시트 설정 정보가 없어 적재를 건너뜁니다.")
         return
 
