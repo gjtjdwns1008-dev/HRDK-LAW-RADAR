@@ -33,24 +33,42 @@ def clean_to_markdown(title, content):
     return f"### 📜 {title}\n{text}\n"
 
 # ==========================================
-# 법령 수집 메인 함수 (소관부처 추출 로직 포함)
+# 법령 수집 메인 함수 (3단계 패자부활전 탑재)
 # ==========================================
 def get_base_laws(target_date=TARGET_DATE):
-    """특정 일자의 법령을 수집하고, 프리필터링 및 텍스트 정제를 수행합니다."""
+    """특정 일자의 법령을 수집하고, 프리필터링 및 텍스트 정제를 수행하며 네트워크 오류 시 패자부활전을 가동합니다."""
     all_laws_dict = {}
     SKIP_KEYWORDS = ['직제', '행정기구', '사무분장', '분장규정', '위원회', '정원', '위임전결', '선거', '복무규정', '인사규정', '여비규정', '표창규칙']
     
-    # 🌟 신설: 네트워크 연결 실패 여부를 추적하는 플래그
     is_connection_failed = False
     
     for target_type in ['law', 'histlaw']:
         page = 1
         while True:
             search_url = f"https://www.law.go.kr/DRF/lawSearch.do?OC={LAW_API_KEY}&target={target_type}&type=XML&efYd={target_date}~{target_date}&display=100&page={page}"
+            
+            # 🌟 [신설] 1단계: 법령 목록 조회 패자부활전 (최대 3회 시도)
+            response = None
+            for attempt in range(1, 4):
+                try:
+                    response = session.get(search_url, headers=HEADERS, timeout=30)
+                    if response.status_code == 200:
+                        break  # 접속 성공 시 재시도 루프 즉시 통과
+                except Exception as e:
+                    if attempt == 3:
+                        print(f"  ❌ [최종 실패] 법령 목록 조회 엔진 작동 불능 (법제처 서버 마비): {e}")
+                        is_connection_failed = True
+                        break
+                    print(f"  ⚠️ [네트워크 지연] 법령 목록 수집 실패({e}). {attempt}회차 실패 ➡️ 20초 대기 후 자동 재시도합니다...")
+                    time.sleep(20)
+            
+            if is_connection_failed or response is None:
+                break
+                
+            if not response.text.strip() or response.status_code != 200: 
+                break
+                
             try:
-                # 🌟 타임아웃을 15초에서 30초로 늘려 서버 지연에 대응합니다.
-                response = session.get(search_url, headers=HEADERS, timeout=30)
-                if not response.text.strip() or response.status_code != 200: break
                 root = ET.fromstring(response.text)
                 law_nodes = root.findall('.//law')
                 if not law_nodes: break
@@ -77,7 +95,25 @@ def get_base_laws(target_date=TARGET_DATE):
                         continue
 
                     detail_url = f"https://www.law.go.kr/DRF/lawService.do?OC={LAW_API_KEY}&target={target_type}&MST={law_id}&type=XML"
-                    detail_response = session.get(detail_url, headers=HEADERS, timeout=30)
+                    
+                    # 🌟 [신설] 2단계: 개별 법령 상세 조문 조회 패자부활전 (최대 3회 시도)
+                    detail_response = None
+                    for d_attempt in range(1, 4):
+                        try:
+                            detail_response = session.get(detail_url, headers=HEADERS, timeout=30)
+                            if detail_response.status_code == 200 and detail_response.text.strip():
+                                break
+                        except Exception as de:
+                            if d_attempt == 3:
+                                print(f"  ❌ [최종 실패] '{law_name}' 상세 조문 수집 불가로 차단: {de}")
+                                is_connection_failed = True
+                                break
+                            print(f"  ⚠️ [네트워크 지연] '{law_name}' 상세조회 실패({de}). {d_attempt}회차 실패 ➡️ 10초 대기 후 재시도...")
+                            time.sleep(10)
+                    
+                    if is_connection_failed or detail_response is None:
+                        break
+                        
                     detail_root = ET.fromstring(detail_response.text)
                     
                     reason_text = ""
@@ -107,16 +143,20 @@ def get_base_laws(target_date=TARGET_DATE):
                         "공포번호": prom_num, "공포일자": prom_date, "원본": full_text[:15000], "링크": base_law_link, "스킵여부": False 
                     }
                     time.sleep(0.1) 
+                
+                if is_connection_failed:
+                    break
+                    
                 if len(law_nodes) < 100: break
                 page += 1
             except Exception as e: 
-                print(f"⚠️ 법령 수집 중 에러 발생: {e}")
-                # 🌟 핵심: 접속 실패나 타임아웃 에러 발생 시 플래그를 True로 전환하고 루프 종료
+                print(f"⚠️ 법령 데이터 파싱/처리 중 크리티컬 에러 발생: {e}")
                 is_connection_failed = True
                 break
+                
         if is_connection_failed: break
 
-    # 🌟 수집된 데이터가 하나도 없는데, 그 원인이 네트워크 에러 때문이라면 None 반환!
+    # 🌟 3단계: 수집 결과가 아예 없는데, 네트워크 에러 플래그가 서 있다면 최종적으로 None 리턴 (안전 종료 트리거)
     if is_connection_failed and not all_laws_dict:
         return None
         
