@@ -1,12 +1,32 @@
+import os  # 🌟 신설: 파일 존재 여부 확인을 위해 추가
 import time
-from config import TARGET_DATE
+from config import TARGET_DATE, QUALIFICATION_CSV_PATH  # 🌟 신설: CSV 파일 경로 변수 가져오기
 from law_scrapper import get_base_laws
 from brain_gemini import run_ai_analysis
 from report_maker import upload_to_google_sheet, create_excel_report, send_webhook_with_file
 
+# ==========================================
+# 🌟 신설: CSV 파일을 안전하게 읽어오는 함수
+# ==========================================
+def load_qualification_list(csv_path):
+    if not os.path.exists(csv_path):
+        print(f"⚠️ 경고: {csv_path} 파일을 찾을 수 없습니다. 빈 문자열로 대체합니다.")
+        return ""
+    
+    # 강력한 인코딩 에러 방어 로직 (utf-8 실패 시 cp949로 재시도)
+    try:
+        with open(csv_path, 'r', encoding='utf-8') as f:
+            return f.read()
+    except UnicodeDecodeError:
+        with open(csv_path, 'r', encoding='cp949') as f:
+            return f.read()
+
 def main():
     print(f"🚀 [HRDK LAW-RADAR] {TARGET_DATE} 데이터 수집 및 분석 시작...\n" + "="*50)
     start_time = time.time()
+
+    # 🌟 신설: AI에게 먹일 '국가기술자격 종목 리스트'를 CSV에서 텍스트로 미리 읽어옵니다.
+    qnet_certs_text = load_qualification_list(QUALIFICATION_CSV_PATH)
 
     # ==========================================
     # 1. 법령 수집 (프리필터링 포함)
@@ -15,7 +35,7 @@ def main():
     if not laws:
         print(f"  ℹ️ {TARGET_DATE} 시행되는 법령이 없습니다. (0건 기록 및 빈 리포트 전송)")
         
-        # 🌟 구글 시트 적재 함수 호출 (통합 바구니 1개 전달)
+        # 구글 시트 적재 함수 호출 (통합 바구니 1개 전달)
         upload_to_google_sheet(0, [])
         empty_excel = create_excel_report([])
         
@@ -24,7 +44,7 @@ def main():
         
         return # 종료
 
-    # 💡 [핵심 수정 1] 연관/단순 구분을 없애고 'target_laws' 하나로 통합!
+    # 연관/단순 구분을 없애고 'target_laws' 하나로 통합!
     target_laws = [] 
     failed_queue = []
     all_results_for_sheet = [] # 구글 시트에 넣을 전체 마스터 데이터 모음
@@ -42,7 +62,7 @@ def main():
 
         if law.get("스킵여부") == True:
             print("    ⏩ [스킵: 조직/직제 관련]")
-            # 💡 [핵심 수정 2] 새로운 COLUMNS(이름표)에 맞춰 딕셔너리 키 이름 변경
+            # 새로운 COLUMNS(이름표)에 맞춰 딕셔너리 키 이름 변경
             skip_info = {
                 "시행일자": law["시행일자"], "법령명": law["법령명"], 
                 "상세 분석결과": "조직/직제 관련 법령으로 AI 분석 생략", 
@@ -51,13 +71,13 @@ def main():
             all_results_for_sheet.append(skip_info)
             continue
 
-        # AI 두뇌 호출 (is_related 변수에 "연관높음", "단순관련", "해당없음" 중 하나가 담김)
-        success, is_related, law_info = run_ai_analysis(law)
+        # 🌟 핵심 수정: AI 두뇌 호출 시 읽어온 종목 리스트(qnet_certs_text)를 같이 던져줍니다!
+        success, is_related, law_info = run_ai_analysis(law, qnet_certs_text)
         
         elapsed = time.time() - start_time_loop
         
         if success:
-            # 💡 [핵심 수정 3] "해당없음"만 아니면 몽땅 target_laws (관련법령) 바구니에 담습니다.
+            # "해당없음"만 아니면 몽땅 target_laws (관련법령) 바구니에 담습니다.
             if is_related != "해당없음": 
                 target_laws.append(law_info)
                 print(f"    ✅ 관련 법령 식별 ({elapsed:.1f}초)")
@@ -77,7 +97,9 @@ def main():
         time.sleep(20)
         for law in failed_queue:
             print(f"  [재시도] {law['법령명']}... ", end="", flush=True)
-            success, is_related, law_info = run_ai_analysis(law, attempt_count=3)
+            
+            # 🌟 핵심 수정: 재시도할 때도 종목 리스트(qnet_certs_text)를 같이 던져줍니다!
+            success, is_related, law_info = run_ai_analysis(law, qnet_certs_text, attempt_count=3)
             
             if success:
                 if is_related != "해당없음": 
@@ -88,7 +110,7 @@ def main():
                 all_results_for_sheet.append(law_info)
             else:
                 print("💀 [최종 실패]")
-                # 💡 [핵심 수정 4] 실패 시에도 새로운 COLUMNS에 맞춰서 구조화
+                # 실패 시에도 새로운 COLUMNS에 맞춰서 구조화
                 fail_info = {"시행일자": law["시행일자"], "법령명": law["법령명"], "상세 분석결과": "AI 분석 최종 실패", "연관성_판별": "해당없음", "검토 필요": "X"}
                 all_results_for_sheet.append(fail_info)
 
@@ -96,7 +118,7 @@ def main():
     # 4. 보고서 작성 및 발송
     # ==========================================
     print("\n📝 구글 시트 마스터 DB 적재 시작...")
-    # 💡 [핵심 수정 5] 함수에 넘겨주는 바구니를 'target_laws' 하나로 통일!
+    # 함수에 넘겨주는 바구니를 'target_laws' 하나로 통일!
     upload_to_google_sheet(len(laws), target_laws)
 
     print("\n📊 보고용 엑셀 파일 생성 중...")
