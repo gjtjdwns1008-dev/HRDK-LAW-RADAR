@@ -9,6 +9,14 @@ from openpyxl.styles import Alignment, PatternFill, Font, Border, Side
 # 💡 1단계 config 파일에서 설정값들을 가져옵니다.
 from config import COLUMNS, WEBHOOK_URL, GCP_SERVICE_ACCOUNT_JSON, GOOGLE_SHEET_URL, TARGET_DATE
 
+# 🌟 [신설 헬퍼] 숫자를 엑셀 열 문자(1->A, 17->Q)로 변환해주는 함수
+def get_column_letter(n):
+    string = ""
+    while n > 0:
+        n, remainder = divmod(n - 1, 26)
+        string = chr(65 + remainder) + string
+    return string
+
 # ==========================================
 # 1. 구글 시트 마스터 DB 적재 (통합 Upsert 엔진)
 # ==========================================
@@ -60,6 +68,9 @@ def upload_to_google_sheet(total_len, target_laws, target_date=TARGET_DATE):
 
                 new_rows_to_append = []
 
+                # 🌟 [개선] COLUMNS 길이에 맞춰 끝 열 범위 문자 자동 계산 (예: 17개면 Q)
+                end_col_letter = get_column_letter(len(COLUMNS))
+
                 for info in target_laws:
                     nat_key = f"{info.get('법령명','')}|{info.get('근거 조문','')}"
                     
@@ -69,7 +80,9 @@ def upload_to_google_sheet(total_len, target_laws, target_date=TARGET_DATE):
                         existing_id = existing_records[row_idx - 2].get("MST_ID", "")
                         info["MST_ID"] = existing_id 
                         row_data = [info.get(c, "") for c in COLUMNS]
-                        ws_main.update(f'A{row_idx}:O{row_idx}', [row_data]) 
+                        
+                        # 🌟 하드코딩(A~O)을 유연한 계산식(A~Q)으로 변경하여 워크넷 데이터 누락 방지!
+                        ws_main.update(f'A{row_idx}:{end_col_letter}{row_idx}', [row_data]) 
                         print(f"  🔄 [Update] {existing_id}")
                     else:
                         # Insert
