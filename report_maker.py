@@ -7,24 +7,24 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, PatternFill, Font, Border, Side
 
 # 💡 1단계 config 파일에서 설정값들을 가져옵니다.
-from config import COLUMNS, WEBHOOK_URL, GCP_SA_JSON, GOOGLE_SHEET_ID, TARGET_DATE
+from config import COLUMNS, WEBHOOK_URL, GCP_SERVICE_ACCOUNT_JSON, GOOGLE_SHEET_URL, TARGET_DATE
 
 # ==========================================
 # 1. 구글 시트 마스터 DB 적재 (통합 Upsert 엔진)
 # ==========================================
 def upload_to_google_sheet(total_len, target_laws, target_date=TARGET_DATE):
     """[HRDK LAW-RADAR 오버홀] 국가기술자격 관련 법령 전체 통합 Upsert"""
-    if not GCP_SA_JSON or not GOOGLE_SHEET_ID:
+    if not GCP_SERVICE_ACCOUNT_JSON or not GOOGLE_SHEET_URL:
         print("  ⚠️ 구글 시트 설정 정보가 없어 적재를 건너뜁니다.")
         return
 
     try:
         # 인증 로직 (기존과 동일)
-        creds_dict = json.loads(GCP_SA_JSON.strip(), strict=False)
+        creds_dict = json.loads(GCP_SERVICE_ACCOUNT_JSON.strip(), strict=False)
         scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
         creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
         client = gspread.authorize(creds)
-        spreadsheet = client.open_by_key(GOOGLE_SHEET_ID)
+        spreadsheet = client.open_by_key(GOOGLE_SHEET_URL)
 
         # 1) 총괄현황표 로깅
         try:
