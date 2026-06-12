@@ -3,7 +3,7 @@ name: HRDK LAW-RADAR
 on:
   schedule:
     # ⏰ 깃허브는 UTC 기준이므로, 한국 새벽 4시 = UTC 전날 밤 7시(19)입니다.
-    - cron: '0 19 * * *'
+    - cron: '19 18 * * *'
   workflow_dispatch: # 🔘 수동으로 테스트 실행할 수 있는 버튼을 만들어줍니다.
 
 jobs:
