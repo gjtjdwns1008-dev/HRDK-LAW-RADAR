@@ -9,13 +9,15 @@ from urllib3.util.retry import Retry
 from config import LAW_API_KEY, TARGET_DATE
 
 # ==========================================
-# 통신 안정성 세팅 (기존과 동일)
+# 🛡️ 1차 방어: 통신 안정성 세팅 (urllib3 레벨 5회 강제 자동 재시도)
 # ==========================================
 HEADERS = {'User-Agent': 'Mozilla/5.0'}
 session = requests.Session()
 retry = Retry(
     total=5, 
-    backoff_factor=2, 
+    connect=5,        # 🌟 [핵심] 연결 타임아웃(Timeout) 발생 시 5번 강제 자동 재시도
+    read=5,           # 데이터를 읽다가 끊겼을 때도 5번 재시도
+    backoff_factor=2, # 재시도 간격을 2초, 4초, 8초로 점진적 증가시켜 서버 부담 완화
     status_forcelist=[500, 502, 503, 504],
     allowed_methods=["GET"]
 )
@@ -33,21 +35,23 @@ def clean_to_markdown(title, content):
     return f"### 📜 {title}\n{text}\n"
 
 # ==========================================
-# 법령 수집 메인 함수 (3단계 패자부활전 탑재)
+# 법령 수집 메인 함수 (3중 철통 방어망 탑재)
 # ==========================================
 def get_base_laws(target_date=TARGET_DATE):
     """특정 일자의 법령을 수집하고, 프리필터링 및 텍스트 정제를 수행하며 네트워크 오류 시 패자부활전을 가동합니다."""
     all_laws_dict = {}
     SKIP_KEYWORDS = ['직제', '행정기구', '사무분장', '분장규정', '위원회', '정원', '위임전결', '선거', '복무규정', '인사규정', '여비규정', '표창규칙']
     
-    is_connection_failed = False
+    is_connection_failed = False # 🌟 [3차 방어용] 네트워크 완전 뻗음 감지 플래그
     
     for target_type in ['law', 'histlaw']:
         page = 1
         while True:
             search_url = f"https://www.law.go.kr/DRF/lawSearch.do?OC={LAW_API_KEY}&target={target_type}&type=XML&efYd={target_date}~{target_date}&display=100&page={page}"
             
-            # 🌟 [신설] 1단계: 법령 목록 조회 패자부활전 (최대 3회 시도)
+            # ==========================================
+            # 🛡️ 2차 방어: 수동 패자부활전 (법령 목록 조회)
+            # ==========================================
             response = None
             for attempt in range(1, 4):
                 try:
@@ -96,7 +100,9 @@ def get_base_laws(target_date=TARGET_DATE):
 
                     detail_url = f"https://www.law.go.kr/DRF/lawService.do?OC={LAW_API_KEY}&target={target_type}&MST={law_id}&type=XML"
                     
-                    # 🌟 [신설] 2단계: 개별 법령 상세 조문 조회 패자부활전 (최대 3회 시도)
+                    # ==========================================
+                    # 🛡️ 2차 방어: 수동 패자부활전 (상세 조문 조회)
+                    # ==========================================
                     detail_response = None
                     for d_attempt in range(1, 4):
                         try:
@@ -156,7 +162,10 @@ def get_base_laws(target_date=TARGET_DATE):
                 
         if is_connection_failed: break
 
-    # 🌟 3단계: 수집 결과가 아예 없는데, 네트워크 에러 플래그가 서 있다면 최종적으로 None 리턴 (안전 종료 트리거)
+    # ==========================================
+    # 🛡️ 3차 방어: 0건 가짜 리포트 발송 원천 차단
+    # ==========================================
+    # 🌟 수집된 데이터가 아예 없는데, 네트워크 에러 플래그가 서 있다면 최종적으로 None 리턴!
     if is_connection_failed and not all_laws_dict:
         return None
         
