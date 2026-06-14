@@ -8,7 +8,7 @@ on:
 
 jobs:
   run-monitor:
-    runs-on: ubuntu-latest # 깃허브가 빌려주는 가상 리눅스 컴퓨터
+    runs-on: ubuntu-latest
 
     steps:
     - name: 📂 소스 코드 가져오기
@@ -17,20 +17,24 @@ jobs:
     - name: 🐍 파이썬 환경 세팅
       uses: actions/setup-python@v5
       with:
-        python-version: '3.11' # 안정적인 파이썬 3.11 버전 사용
+        python-version: '3.11'
 
     - name: 📦 필수 라이브러리 설치
+      # GITHUB_TOKEN은 GitHub Actions가 자동으로 제공합니다. (별도 등록 불필요)
+      # requirements.txt의 hrdk-law-core 설치 시 같은 계정 private 레포에 접근하기 위해 사용합니다.
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
         python -m pip install --upgrade pip
-        pip install requests google-genai openpyxl gspread oauth2client
+        pip install -r requirements.txt
 
     - name: 🚀 HRDK LAW-RADAR 메인 스크립트 실행
       env:
-        # 💡 깃허브 보안 창고(Secrets)에서 비밀번호들을 꺼내옵니다.
         LAW_API_KEY: ${{ secrets.LAW_API_KEY }}
         GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
         GOOGLE_SHEET_URL: ${{ secrets.GOOGLE_SHEET_URL }}
         GCP_SERVICE_ACCOUNT_JSON: ${{ secrets.GCP_SERVICE_ACCOUNT_JSON }}
         WORKNET_API_KEY: ${{ secrets.WORKNET_API_KEY }}
+        DB_PATH: hrdk_law.db
       run: python main.py
