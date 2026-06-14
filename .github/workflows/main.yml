@@ -20,17 +20,14 @@ jobs:
         python-version: '3.11'
 
     - name: 📦 필수 라이브러리 설치
-      # GITHUB_TOKEN은 GitHub Actions가 자동으로 제공합니다. (별도 등록 불필요)
-      # requirements.txt의 hrdk-law-core 설치 시 같은 계정 private 레포에 접근하기 위해 사용합니다.
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
         python -m pip install --upgrade pip
-    - name: Install shared core library
-      run: |
-          pip install \
-            "hrdk-law-core @ git+https://github.com/${{ secrets.GITHUB_ACCOUNT }}/hrdk-law-core.git"
-          pip install -r requirements.txt
+        # GITHUB_TOKEN을 이용해 같은 계정의 private 레포(hrdk-law-core)에 접근합니다.
+        # git config 방식은 pip가 requirements.txt를 읽을 때 자동으로 토큰을 주입해줍니다.
+        git config --global url."https://x-access-token:${GITHUB_TOKEN}@github.com/".insteadOf "https://github.com/"
+        pip install -r requirements.txt
 
     - name: 🚀 HRDK LAW-RADAR 메인 스크립트 실행
       env:
