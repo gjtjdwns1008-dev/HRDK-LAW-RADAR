@@ -12,4 +12,4 @@ oauth2client>=4.1.3
 # ── HRDK 공유 코어 (같은 계정의 private 레포에서 설치) ────────
 # YOUR_GITHUB_ACCOUNT를 실제 깃허브 계정명으로 교체하세요.
 # 예: git+https://github.com/hrdk-ai/hrdk-law-core.git
-hrdk-law-core @ git+https://x-access-token:${GITHUB_TOKEN}@github.com/YOUR_GITHUB_ACCOUNT/hrdk-law-core.git
+hrdk-law-core @ git+https://x-access-token:${GITHUB_TOKEN}@github.com/gjtjdwns1008-dev/hrdk-law-core.git
