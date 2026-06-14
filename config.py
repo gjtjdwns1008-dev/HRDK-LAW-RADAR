@@ -10,13 +10,14 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 # 🛠️ [D-3 패치] 웹훅 주소 하드코딩 제거 → GitHub Secrets(환경변수)에서 읽도록 변경
 # ⚠️ 기존 주소는 저장소 이력에 노출되었으므로 Make.com에서 반드시 '재발급' 후 Secrets에 등록하세요.
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
-WORKNET_API_KEY = os.environ.get("WORKNET_API_KEY", "")   # GitHub Secrets에 등록
-DB_PATH = os.environ.get("DB_PATH", "hrdk_law.db")
+WORKNET_API_KEY = os.environ.get("WORKNET_API_KEY", "")  # 🛠️ [중복 제거] 아래 중복 선언 삭제
 
 # [V27 신규] 구글 시트 직접 제어용 환경 변수
 GCP_SERVICE_ACCOUNT_JSON = os.environ.get("GCP_SERVICE_ACCOUNT_JSON")
 GOOGLE_SHEET_URL = os.environ.get("GOOGLE_SHEET_URL")
-WORKNET_API_KEY = os.environ.get("WORKNET_API_KEY")
+
+# Phase 1 신규: SQLite 지식베이스 경로
+DB_PATH = os.environ.get("DB_PATH", "hrdk_law.db")
 
 # ==========================================
 # 2. 날짜 및 공통 변수 설정
@@ -30,7 +31,7 @@ TARGET_DATE = yesterday.strftime("%Y%m%d")
 
 # 💡 만약 과거 데이터를 돌리고 싶다면 이 변수를 수동으로 바꿔서 쓰면 됩니다.
 # 💡 TARGET_DATE = "20260429"
-# 💡 TARGET_DATE = yesterday.strftime("%Y%m%d") # 💡 오전 5시에 돌면 어제 법령 전체를 다 가져옵니다!
+# 💡 TARGET_DATE = yesterday.strftime("%Y%m%d")
 # 💡 TARGET_DATE = today.strftime("%Y%m%d")
 
 # ==========================================
@@ -38,25 +39,25 @@ TARGET_DATE = yesterday.strftime("%Y%m%d")
 # ==========================================
 COLUMNS = [
     "MST_ID",          # 🌟 신설: 마스터 고유 ID (예: HRDK-L-0001)
-    "시행일자", 
+    "시행일자",
     "소관부처",        # 🌟 신설: 여기에 소관부처를 추가합니다!
-    "법령명", 
-    "연관성_판별", 
-    "관련 종목", 
-    "조문 요약", 
+    "법령명",
+    "연관성_판별",
+    "관련 종목",
+    "조문 요약",
     "Track1_취급유형", # 🌟 신설: A~E 유형
     "Track1_위험도",   # 🌟 신설: C, H, M, L, N
     "Track2_효용코드", # 🌟 신설: Ⅰ-1 ~ Ⅳ-0
-    "상세 분석결과", 
-    "근거 조문", 
-    "AI 신뢰도", 
-    "검토 필요", 
-    "검토 사유", 
-    "조문별 다이렉트 링크",  # 🛠️ [D-1 패치] 쉼표 누락 수정! (이게 빠지면 파이썬이 아래 줄과 한 덩어리 문자열로 합쳐버립니다)
+    "상세 분석결과",
+    "근거 조문",
+    "AI 신뢰도",
+    "검토 필요",
+    "검토 사유",
+    "조문별 다이렉트 링크",  # 🛠️ [D-1 패치] 쉼표 누락 수정!
     "워크넷_실시간_구인건수" # 🌟 [신설] 맨 마지막 17번째 컬럼(Q열)으로 추가!
 ]
 
 # ==========================================
-# 3. 공단 전용 491개 자격 종목 사전
+# 3. 공단 전용 자격 종목 사전 CSV 경로
 # ==========================================
 QUALIFICATION_CSV_PATH = "26년 국가기술자격 종목.csv"
