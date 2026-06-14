@@ -10,6 +10,8 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 # 🛠️ [D-3 패치] 웹훅 주소 하드코딩 제거 → GitHub Secrets(환경변수)에서 읽도록 변경
 # ⚠️ 기존 주소는 저장소 이력에 노출되었으므로 Make.com에서 반드시 '재발급' 후 Secrets에 등록하세요.
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
+WORKNET_API_KEY = os.environ.get("WORKNET_API_KEY", "")   # GitHub Secrets에 등록
+DB_PATH = os.environ.get("DB_PATH", "hrdk_law.db")
 
 # [V27 신규] 구글 시트 직접 제어용 환경 변수
 GCP_SERVICE_ACCOUNT_JSON = os.environ.get("GCP_SERVICE_ACCOUNT_JSON")
