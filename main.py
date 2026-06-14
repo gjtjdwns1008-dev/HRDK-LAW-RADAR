@@ -66,7 +66,8 @@ def main():
                 total_len=0, target_laws=[],
                 status="🔴 시스템 에러 (법제처 API)", log=err_msg,
             )
-            return
+            sys.exit(1)  # 🛠️ [타임아웃 재시도 패치] return → sys.exit(1)
+            # 종료코드 1 = 워크플로우가 "실패"로 인식 → main.yml 재시도 루프 트리거
 
         if not laws:
             print(f"  ℹ️ {TARGET_DATE} 시행 법령 없음. (0건 처리)")
