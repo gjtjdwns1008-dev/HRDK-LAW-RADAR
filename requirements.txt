@@ -1,5 +1,7 @@
 # HRDK LAW-RADAR 의존성
-# Phase 1부터는 공유 코어 라이브러리를 여기서 함께 설치합니다.
+# pip는 URL 안의 ${GITHUB_TOKEN}을 직접 확장하지 않습니다.
+# 인증은 워크플로우(main.yml)의 git config 명령이 처리합니다.
+# 이 파일에는 토큰 없이 순수 URL만 적으면 됩니다.
 
 # ── 외부 패키지 ──────────────────────────────────────────────
 requests>=2.31.0
@@ -9,7 +11,6 @@ openpyxl>=3.1.2
 gspread>=5.12.0
 oauth2client>=4.1.3
 
-# ── HRDK 공유 코어 (같은 계정의 private 레포에서 설치) ────────
-# YOUR_GITHUB_ACCOUNT를 실제 깃허브 계정명으로 교체하세요.
-# 예: git+https://github.com/hrdk-ai/hrdk-law-core.git
-hrdk-law-core @ git+https://x-access-token:${GITHUB_TOKEN}@github.com/gjtjdwns1008-dev/hrdk-law-core.git
+# ── HRDK 공유 코어 ────────────────────────────────────────────
+# 토큰은 main.yml의 git config 명령으로 주입됩니다. (토큰을 URL에 직접 쓰지 않아도 됩니다)
+hrdk-law-core @ git+https://github.com/gjtjdwns1008-dev/hrdk-law-core.git
