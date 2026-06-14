@@ -4,7 +4,7 @@ on:
   schedule:
     # ⏰ 깃허브는 UTC 기준이므로, 한국 새벽 4시 = UTC 전날 밤 7시(19)입니다.
     - cron: '19 18 * * *'
-  workflow_dispatch: # 🔘 수동으로 테스트 실행할 수 있는 버튼을 만들어줍니다.
+  workflow_dispatch:
 
 jobs:
   run-monitor:
@@ -24,12 +24,10 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
         python -m pip install --upgrade pip
-        # GITHUB_TOKEN을 이용해 같은 계정의 private 레포(hrdk-law-core)에 접근합니다.
-        # git config 방식은 pip가 requirements.txt를 읽을 때 자동으로 토큰을 주입해줍니다.
         git config --global url."https://x-access-token:${GITHUB_TOKEN}@github.com/".insteadOf "https://github.com/"
         pip install -r requirements.txt
 
-    - name: 🚀 HRDK LAW-RADAR 메인 스크립트 실행
+    - name: 🚀 HRDK LAW-RADAR 메인 스크립트 실행 (법제처 타임아웃 시 최대 3회 자동 재시도)
       env:
         LAW_API_KEY: ${{ secrets.LAW_API_KEY }}
         GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
@@ -38,4 +36,17 @@ jobs:
         GCP_SERVICE_ACCOUNT_JSON: ${{ secrets.GCP_SERVICE_ACCOUNT_JSON }}
         WORKNET_API_KEY: ${{ secrets.WORKNET_API_KEY }}
         DB_PATH: hrdk_law.db
-      run: python main.py
+      run: |
+        # 법제처 서버가 일시적으로 응답 안 할 때를 대비해 5분 간격으로 최대 3번 재시도합니다.
+        # python main.py가 종료코드 0(성공)을 내면 즉시 break, 1(실패)이면 대기 후 재시도.
+        for i in 1 2 3; do
+          echo "🔄 실행 시도 $i/3..."
+          python main.py && break
+          if [ $i -lt 3 ]; then
+            echo "⏳ 법제처 서버 회복 대기 중... 5분 후 재시도합니다."
+            sleep 300
+          else
+            echo "💀 3회 모두 실패. 오늘 수집을 종료합니다."
+            exit 1
+          fi
+        done
