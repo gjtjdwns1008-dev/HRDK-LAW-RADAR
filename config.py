@@ -7,7 +7,9 @@ from datetime import datetime, timedelta, timezone
 # ==========================================
 LAW_API_KEY = os.environ.get("LAW_API_KEY")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
-WEBHOOK_URL = "https://hook.eu1.make.com/okarw4rcy9yusgxj44ogornxbdj8r51u"
+# 🛠️ [D-3 패치] 웹훅 주소 하드코딩 제거 → GitHub Secrets(환경변수)에서 읽도록 변경
+# ⚠️ 기존 주소는 저장소 이력에 노출되었으므로 Make.com에서 반드시 '재발급' 후 Secrets에 등록하세요.
+WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
 
 # [V27 신규] 구글 시트 직접 제어용 환경 변수
 GCP_SERVICE_ACCOUNT_JSON = os.environ.get("GCP_SERVICE_ACCOUNT_JSON")
@@ -48,7 +50,7 @@ COLUMNS = [
     "AI 신뢰도", 
     "검토 필요", 
     "검토 사유", 
-    "조문별 다이렉트 링크"
+    "조문별 다이렉트 링크",  # 🛠️ [D-1 패치] 쉼표 누락 수정! (이게 빠지면 파이썬이 아래 줄과 한 덩어리 문자열로 합쳐버립니다)
     "워크넷_실시간_구인건수" # 🌟 [신설] 맨 마지막 17번째 컬럼(Q열)으로 추가!
 ]
 
