@@ -13,7 +13,7 @@ import time
 import sys
 
 from config import (
-    TARGET_DATE, QUALIFICATION_CSV_PATH,
+    TARGET_DATE,
     LAW_API_KEY, WORKNET_API_KEY,
     GCP_SERVICE_ACCOUNT_JSON, GOOGLE_SHEET_URL,
     DB_PATH,          # ← config.py에 추가 필요 (기본값: "hrdk_law.db")
@@ -21,6 +21,7 @@ from config import (
 
 # ── 공유 코어 임포트 ─────────────────────────────────────
 from hrdk_law_core.scraper  import get_base_laws
+from hrdk_law_core.certs    import get_qnet_certs_text
 from hrdk_law_core.worknet  import get_worknet_job_count
 from hrdk_law_core.db       import KnowledgeBase
 from hrdk_law_core.hybrid   import verify_with_krivet
@@ -30,17 +31,6 @@ from brain_gemini   import run_ai_analysis
 from report_maker   import upload_to_google_sheet, create_excel_report, send_webhook_with_file
 
 
-def load_qualification_list(csv_path: str) -> str:
-    """종목 CSV를 문자열로 읽습니다. 인코딩 자동 폴백."""
-    if not os.path.exists(csv_path):
-        print(f"⚠️ 경고: {csv_path} 파일을 찾을 수 없습니다.")
-        return ""
-    try:
-        with open(csv_path, "r", encoding="utf-8") as f:
-            return f.read()
-    except UnicodeDecodeError:
-        with open(csv_path, "r", encoding="cp949") as f:
-            return f.read()
 
 
 def main():
@@ -52,7 +42,7 @@ def main():
     print(f"📚 지식베이스 로드 완료 ({DB_PATH})")
 
     try:
-        qnet_certs_text = load_qualification_list(QUALIFICATION_CSV_PATH)
+        qnet_certs_text = get_qnet_certs_text()  # 🌟 코어 단일 출처에서 종목 로드
 
         # ═══════════════════════════════════════════════════
         # 1. 법령 수집 (공유 코어 사용)
