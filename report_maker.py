@@ -117,6 +117,119 @@ def upload_to_google_sheet(total_len, target_laws, target_date=TARGET_DATE, stat
         print(f"  ❌ 구글 시트 연동 중 에러: {e}")
 
 # ==========================================
+# 1-B. 보류목록 탭 내보내기 (코드가 채움, 담당자는 보기만)
+# ==========================================
+# 머리말(헤더): 담당자가 직관적으로 이해 + "검토상태"는 담당자가 직접 표기 가능
+HELD_SHEET_NAME = "보류목록"
+HELD_HEADERS = ["기록일시", "법령명", "시행일자", "소관부처", "보류사유", "법령링크", "검토상태"]
+
+
+def export_held_laws_to_sheet(kb):
+    """SQLite held_laws를 구글 시트 '보류목록' 탭으로 내보냅니다 (담당자 확인용)."""
+    if not GCP_SERVICE_ACCOUNT_JSON or not GOOGLE_SHEET_URL:
+        return
+    try:
+        creds_dict = json.loads(GCP_SERVICE_ACCOUNT_JSON.strip(), strict=False)
+        scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+        client = gspread.authorize(creds)
+        spreadsheet = client.open_by_key(GOOGLE_SHEET_URL)
+
+        # 탭이 없으면 생성하고 헤더 작성
+        try:
+            ws = spreadsheet.worksheet(HELD_SHEET_NAME)
+        except gspread.WorksheetNotFound:
+            ws = spreadsheet.add_worksheet(title=HELD_SHEET_NAME, rows=1000, cols=len(HELD_HEADERS))
+            ws.append_row(HELD_HEADERS)
+
+        # 미검토 보류건만 가져와 시트에 반영 (전체 덮어쓰기 대신 누적 append)
+        held = kb.get_held_laws(only_unreviewed=True, limit=500)
+        if not held:
+            print("  ℹ️ 새로 보류된 법령 없음")
+            return
+
+        # 이미 시트에 있는 (법령명) 중복 방지
+        existing = set()
+        try:
+            for r in ws.get_all_records():
+                existing.add(str(r.get("법령명", "")))
+        except Exception:
+            pass
+
+        new_rows = []
+        for h in held:
+            if h["law_name"] in existing:
+                continue
+            new_rows.append([
+                h.get("created_at", ""), h["law_name"], h.get("enforce_date", ""),
+                h.get("ministry", ""), h.get("hold_reason", ""), h.get("law_link", ""),
+                "",  # 검토상태 — 담당자가 직접 기입
+            ])
+        if new_rows:
+            ws.append_rows(new_rows)
+            print(f"  📋 [보류목록] {len(new_rows)}건 시트 반영")
+    except Exception as e:
+        print(f"  ⚠️ 보류목록 시트 내보내기 실패: {e}")
+
+
+# ==========================================
+# 1-C. 별칭사전 탭 읽기 (담당자가 편집, 코드는 읽기만)
+# ==========================================
+ALIAS_SHEET_NAME = "자격명칭_별칭사전"
+# 머리말(헤더): 앞 4개는 코드가 읽는 필수 / 뒤 3개는 담당자 관리용
+ALIAS_HEADERS = ["구명칭", "현행명칭_2026", "등급", "직무", "등록일", "등록자", "비고"]
+
+
+def ensure_alias_sheet_exists():
+    """별칭사전 탭이 없으면 헤더와 함께 생성합니다 (최초 1회용)."""
+    if not GCP_SERVICE_ACCOUNT_JSON or not GOOGLE_SHEET_URL:
+        return
+    try:
+        creds_dict = json.loads(GCP_SERVICE_ACCOUNT_JSON.strip(), strict=False)
+        scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+        client = gspread.authorize(creds)
+        spreadsheet = client.open_by_key(GOOGLE_SHEET_URL)
+        try:
+            spreadsheet.worksheet(ALIAS_SHEET_NAME)
+        except gspread.WorksheetNotFound:
+            ws = spreadsheet.add_worksheet(title=ALIAS_SHEET_NAME, rows=1000, cols=len(ALIAS_HEADERS))
+            ws.append_row(ALIAS_HEADERS)
+            print(f"  ✅ '{ALIAS_SHEET_NAME}' 탭 생성 (담당자 편집용)")
+    except Exception as e:
+        print(f"  ⚠️ 별칭사전 탭 확인 실패: {e}")
+
+
+def read_alias_overrides_from_sheet():
+    """
+    담당자가 구글 시트 '자격명칭_별칭사전' 탭에 직접 추가한 별칭을 읽어옵니다.
+    코어 cert_aliases.csv(기본)에 더해, 담당자가 운영 중 추가한 매핑을 반영합니다.
+    반환: {구명칭: 현행명칭} dict (없으면 빈 dict)
+    """
+    if not GCP_SERVICE_ACCOUNT_JSON or not GOOGLE_SHEET_URL:
+        return {}
+    try:
+        creds_dict = json.loads(GCP_SERVICE_ACCOUNT_JSON.strip(), strict=False)
+        scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+        client = gspread.authorize(creds)
+        spreadsheet = client.open_by_key(GOOGLE_SHEET_URL)
+        ws = spreadsheet.worksheet(ALIAS_SHEET_NAME)
+        overrides = {}
+        for r in ws.get_all_records():
+            old = str(r.get("구명칭", "")).strip()
+            new = str(r.get("현행명칭_2026", "")).strip()
+            if old and new:
+                overrides[old] = new
+        return overrides
+    except gspread.WorksheetNotFound:
+        return {}
+    except Exception as e:
+        print(f"  ⚠️ 별칭사전 시트 읽기 실패: {e}")
+        return {}
+
+
+# ==========================================
 # 2. 엑셀 파일 생성 함수 (시트 1개로 단일화)
 # ==========================================
 def create_excel_report(target_laws, target_date=TARGET_DATE):

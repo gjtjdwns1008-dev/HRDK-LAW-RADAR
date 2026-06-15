@@ -28,7 +28,10 @@ from hrdk_law_core.hybrid   import verify_with_krivet
 
 # ── 기존 모듈 (변경 없음) ────────────────────────────────
 from brain_gemini   import run_ai_analysis
-from report_maker   import upload_to_google_sheet, create_excel_report, send_webhook_with_file
+from report_maker   import (
+    upload_to_google_sheet, create_excel_report, send_webhook_with_file,
+    export_held_laws_to_sheet, ensure_alias_sheet_exists, read_alias_overrides_from_sheet,
+)
 
 
 
@@ -40,6 +43,17 @@ def main():
     # ── 지식베이스 로드 ──────────────────────────────────
     kb = KnowledgeBase(DB_PATH)
     print(f"📚 지식베이스 로드 완료 ({DB_PATH})")
+
+    # ── 별칭사전 탭 준비 + 담당자가 추가한 별칭 반영 ──────
+    ensure_alias_sheet_exists()  # 최초 1회 탭 생성 (이미 있으면 무시)
+    try:
+        from hrdk_law_core.certs import register_alias_overrides
+        overrides = read_alias_overrides_from_sheet()
+        if overrides:
+            register_alias_overrides(overrides)
+            print(f"  🔤 담당자 추가 별칭 {len(overrides)}건 반영")
+    except Exception as e:
+        print(f"  ⚠️ 별칭 오버라이드 반영 실패(기본 사전으로 진행): {e}")
 
     try:
         qnet_certs_text = get_qnet_certs_text()  # 🌟 코어 단일 출처에서 종목 로드
@@ -215,6 +229,10 @@ def main():
 
         print("\n🚀 Make.com 웹훅 전송 시작...")
         send_webhook_with_file(excel_filename, len(laws), len(target_laws), 0)
+
+        # 🌟 보류목록을 구글 시트 탭으로 내보내기 (담당자 확인용)
+        print("\n📋 보류목록 시트 반영 중...")
+        export_held_laws_to_sheet(kb)
 
         elapsed_total = time.time() - start_time
         print(f"\n🎉 [종료] 완료! (소요 시간: {elapsed_total / 60:.1f}분)")
