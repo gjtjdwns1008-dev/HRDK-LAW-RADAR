@@ -21,7 +21,7 @@ from config import (
 
 # ── 공유 코어 임포트 ─────────────────────────────────────
 from hrdk_law_core.scraper  import get_base_laws
-from hrdk_law_core.certs    import get_qnet_certs_text
+from hrdk_law_core.certs    import get_qnet_certs_text, get_relevant_certs_text
 from hrdk_law_core.worknet  import get_worknet_job_count
 from hrdk_law_core.db       import KnowledgeBase
 from hrdk_law_core.hybrid   import verify_with_krivet
@@ -80,16 +80,28 @@ def main():
             t0 = time.time()
 
             if law.get("스킵여부"):
-                print("    ⏩ [스킵: 조직/직제 관련]")
+                hold_reason = law.get("스킵사유", "조직/직제 관련")
+                print(f"    ⏩ [보류: {hold_reason}] (삭제 아님, 보류 로그에 기록)")
+                # 🌟 [버리지 않는 체] AI는 건너뛰되 사유와 함께 DB에 보존
+                try:
+                    kb.add_held_law(
+                        law_name=law["법령명"],
+                        enforce_date=law.get("시행일자", ""),
+                        ministry=law.get("소관부처", ""),
+                        hold_reason=hold_reason,
+                        law_link=law.get("링크", ""),
+                    )
+                except Exception as he:
+                    print(f"      ⚠️ 보류 로그 기록 실패: {he}")
                 all_results.append({
                     "시행일자": law["시행일자"], "법령명": law["법령명"],
-                    "상세 분석결과": "조직/직제 관련 법령으로 AI 분석 생략",
+                    "상세 분석결과": f"AI 분석 보류 ({hold_reason})",
                     "연관성_판별": "해당없음", "검토 필요": "X",
                     "조문별 다이렉트 링크": law["링크"],
                 })
                 continue
 
-            success, is_related, law_info = run_ai_analysis(law, qnet_certs_text)
+            success, is_related, law_info = run_ai_analysis(law, get_relevant_certs_text(law.get("원본", "")))
             elapsed = time.time() - t0
 
             if success:
@@ -129,7 +141,7 @@ def main():
             time.sleep(20)
             for law in failed_queue:
                 print(f"  [재시도] {law['법령명']}... ", end="", flush=True)
-                success, is_related, law_info = run_ai_analysis(law, qnet_certs_text, attempt_count=3)
+                success, is_related, law_info = run_ai_analysis(law, get_relevant_certs_text(law.get("원본", "")), attempt_count=3)
                 if success:
                     if is_related != "해당없음":
                         job_demand = get_worknet_job_count(
