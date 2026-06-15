@@ -21,7 +21,7 @@ from config import (
 
 # ── 공유 코어 임포트 ─────────────────────────────────────
 from hrdk_law_core.scraper  import get_base_laws
-from hrdk_law_core.certs    import get_qnet_certs_text, get_relevant_certs_text
+from hrdk_law_core.certs    import get_qnet_certs_text, get_relevant_certs_text, detect_name_change_signal
 from hrdk_law_core.worknet  import get_worknet_job_count
 from hrdk_law_core.db       import KnowledgeBase
 from hrdk_law_core.hybrid   import verify_with_krivet
@@ -103,6 +103,20 @@ def main():
 
             success, is_related, law_info = run_ai_analysis(law, get_relevant_certs_text(law.get("원본", "")))
             elapsed = time.time() - t0
+
+            # 🌟 [B 알림] 자격 명칭 변경 의심 감지 → 변천사 업데이트 필요 알림 (자동변경 X)
+            if detect_name_change_signal(law.get("법령명", ""), law.get("원본", "")):
+                print(f"    🔔 [명칭변경 의심] '{law['법령명']}' — 변천사(cert_aliases) 업데이트 검토 필요")
+                try:
+                    kb.add_held_law(
+                        law_name=law["법령명"],
+                        enforce_date=law.get("시행일자", ""),
+                        ministry=law.get("소관부처", ""),
+                        hold_reason="⚠️ 자격명칭 변경 의심 — 변천사 자료 업데이트 검토 필요",
+                        law_link=law.get("링크", ""),
+                    )
+                except Exception:
+                    pass
 
             if success:
                 if is_related != "해당없음":
