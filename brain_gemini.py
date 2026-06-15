@@ -1,42 +1,42 @@
 import json
 import re
-import time
-from google import genai
-from google.genai import types
+from hrdk_law_core.llm_client import get_llm_client
 
-from config import GEMINI_API_KEY
+# 🌟 [모델 추상화] Gemini를 직접 부르지 않고 "통역 창구"를 통해 호출합니다.
+# 환경변수 LLM_PROVIDER로 모델을 바꿀 수 있습니다. (기본: gemini)
+_llm = None
+def _client():
+    global _llm
+    if _llm is None:
+        _llm = get_llm_client()
+    return _llm
 
-# 🚨 [V29 최신 방식] 옛날 방식인 genai.configure는 완전히 사라졌습니다!
-client = genai.Client(api_key=GEMINI_API_KEY)
 
-# 🌟🌟🌟 [추가된 부분 1] 링크 조립 공장 (RESTful 포맷 생성기) 🌟🌟🌟
+# 🌟 링크 조립 공장 (RESTful 포맷 생성기) - 변경 없음
 def generate_new_law_link(law_name, enforce_date, prom_num, prom_date, article_name):
     """별표/서식인지 일반 조항인지 구분해서 법제처 RESTful 링크를 완성합니다."""
     star_match = re.search(r'(별표|서식)\s*(\d+)', article_name)
     if star_match:
-        target_id = f"{star_match.group(1)}{star_match.group(2)}" # 예: 별표2
+        target_id = f"{star_match.group(1)}{star_match.group(2)}"
         return f"https://www.law.go.kr/법령별표서식/({law_name},{enforce_date},{target_id})"
-    
+
     jo_match = re.search(r'(제\d+조(?:의\d+)?)', article_name)
     if jo_match:
-        target_id = jo_match.group(1) # 예: 제5조
+        target_id = jo_match.group(1)
         return f"https://www.law.go.kr/법령/{law_name}/({enforce_date},{prom_num},{prom_date})/{target_id}"
-    
-    # 조문 매칭 실패 시 그냥 기본 법령 링크로 보냄
+
     return f"https://www.law.go.kr/법령/{law_name}"
 
 
 def run_ai_analysis(law, qnet_certs_text, attempt_count=5):
-    # ==========================================
-    # 🌟 [개편된 프롬프트] Track 1(정책) & Track 2(국민) 투트랙 입체 분석 모드
-    # ==========================================
+    # 🌟 [투트랙 입체 분석 프롬프트] - 변경 없음
     prompt = f"""
     당신은 한국산업인력공단(HRDK)의 '국가기술자격 법령 모니터링 시스템(LAW-RADAR)'을 담당하는 수석 연구원(AI)입니다.
     당신의 임무는 매일 수집되는 제·개정 법령 조문을 분석하여, 해당 법령이 국가기술자격에 미치는 영향을 두 가지 독립적인 트랙(Track)으로 완벽하게 분류하고 정형화된 JSON 형태로 출력하는 것입니다.
 
     입력되는 법령이 다음 491개 국가기술자격 종목 중 어느 것과 연관되는지 파악하십시오.
     [국가기술자격 종목 리스트]
-    {qnet_certs_text}   # <-- 밖에서 받아온 텍스트가 여기에 쏙 들어갑니다!
+    {qnet_certs_text}
 
     ### 🎯 [핵심 분류 기준 (반드시 숙지)]
 
@@ -90,106 +90,82 @@ def run_ai_analysis(law, qnet_certs_text, attempt_count=5):
     }}
     """
 
-    for attempt in range(attempt_count):
-        if attempt > 0:
-            print(f"\n    🔄 [재시도 {attempt}/{attempt_count-1}] 구글 서버 다시 찌르는 중... ", end="", flush=True)
+    # 🌟 [모델 추상화] 호출/재시도는 통역 창구에 위임
+    try:
+        raw_text = _client().generate_with_retry(
+            prompt,
+            attempt_count=attempt_count,
+            max_output_tokens=32768,
+            temperature=0.1,
+        )
+    except Exception as e:
+        return False, "", {"error": str(e)}
+
+    # 응답 파싱 - 모델 무관, 변경 없음
+    try:
+        match = re.search(r'```json\s*(.*?)\s*```', raw_text, re.DOTALL | re.IGNORECASE)
+        if match:
+            json_str = match.group(1)
+        else:
+            json_str = raw_text.replace("```json", "").replace("```JSON", "").replace("```", "").strip()
+
+        json_str = json_str.replace('\n', ' ').replace('\r', ' ').replace('\t', ' ')
 
         try:
-            response = client.models.generate_content(
-                model='gemini-3.5-flash', 
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    max_output_tokens=32768, 
-                    temperature=0.1 
+            data = json.loads(json_str, strict=False)
+        except json.JSONDecodeError as je:
+            print(f"\n    🚨 [AI 문법 파괴 발생! 범인 색출 블랙박스 로그]")
+            print(f"    >> AI가 뱉은 날것의 텍스트:\n{json_str}\n")
+            return False, "", {"error": f"JSON 문법 오류: {je}"}
+
+        jomun_list = data.get("조문리스트", [])
+        if not jomun_list or not isinstance(jomun_list, list):
+            jomun_list = [{"조문명": "내용 확인", "숫자": ""}]
+
+        links_str_list = []
+        names_str_list = []
+
+        for j in jomun_list:
+            j_name = j.get("조문명", "확인불가")
+            if "별표" in j_name:
+                j_name = re.sub(r'별표\s*(\d+)', r'별표 \1', j_name)
+
+            if j_name == "내용 확인":
+                names_str_list.append("전체 (세부 조문 미지정)")
+                links_str_list.append(f"▶ {law['법령명']}\n{law['링크']}")
+            else:
+                names_str_list.append(j_name)
+                new_link = generate_new_law_link(
+                    law_name=law.get('법령명', ''),
+                    enforce_date=law.get('시행일자', ''),
+                    prom_num=law.get('공포번호', ''),
+                    prom_date=law.get('공포일자', ''),
+                    article_name=j_name,
                 )
-            )
-            
-            raw_text = response.text.strip()
+                links_str_list.append(f"▶ {law['법령명']} {j_name}\n{new_link}")
 
-            match = re.search(r'```json\s*(.*?)\s*```', raw_text, re.DOTALL | re.IGNORECASE)
-            if match:
-                json_str = match.group(1)
-            else:
-                json_str = raw_text.replace("```json", "").replace("```JSON", "").replace("```", "").strip()
-            
-            json_str = json_str.replace('\n', ' ').replace('\r', ' ').replace('\t', ' ')
-            
-            try:
-                data = json.loads(json_str, strict=False)
-            except json.JSONDecodeError as je:
-                print(f"\n    🚨 [AI 문법 파괴 발생! 범인 색출 블랙박스 로그]")
-                print(f"    >> AI가 뱉은 날것의 텍스트:\n{json_str}\n")
-                raise Exception(f"JSON 문법 오류: {je}")
+        links_str = "\n\n".join(links_str_list)
+        names_str = ", ".join(names_str_list)
 
-            jomun_list = data.get("조문리스트", [])
-            if not jomun_list or not isinstance(jomun_list, list):
-                jomun_list = [{"조문명": "내용 확인", "숫자": ""}]
-                
-            links_str_list = []
-            names_str_list = []
-            
-            # 🌟🌟🌟 [추가된 부분 2] 링크를 조립해서 리스트에 넣는 로직 🌟🌟🌟
-            for j in jomun_list:
-                j_name = j.get("조문명", "확인불가")
-                if "별표" in j_name:
-                    j_name = re.sub(r'별표\s*(\d+)', r'별표 \1', j_name)
-                
-                if j_name == "내용 확인":
-                    names_str_list.append("전체 (세부 조문 미지정)")
-                    links_str_list.append(f"▶ {law['법령명']}\n{law['링크']}")
-                else:
-                    names_str_list.append(j_name)
-                    
-                    # law_api.py에서 주머니에 넣어둔 재료(공포번호 등)를 꺼내서 링크 완성!
-                    new_link = generate_new_law_link(
-                        law_name=law.get('법령명', ''),
-                        enforce_date=law.get('시행일자', ''),
-                        prom_num=law.get('공포번호', ''),
-                        prom_date=law.get('공포일자', ''),
-                        article_name=j_name
-                    )
-                    links_str_list.append(f"▶ {law['법령명']} {j_name}\n{new_link}")
-            # 🌟🌟🌟 (여기까지 변경됨) 🌟🌟🌟
-                
-            links_str = "\n\n".join(links_str_list)
-            names_str = ", ".join(names_str_list)
-            
-            # ==========================================
-            # 🌟 [개편된 출력부] 투트랙 매트릭스 결과를 담아내는 새 딕셔너리
-            # ==========================================
-            law_info = {
-                "시행일자": law["시행일자"],
-                "소관부처": law.get("소관부처", ""),  # <-- 스크래퍼가 챙겨온 부처명 꽂아넣기!
-                "법령명": law["법령명"],
-                "연관성_판별": data.get("연관성_판별", "해당없음"),  # (라우팅용 핵심 변수)
-                "관련 종목": data.get("종목", ""),
-                "조문 요약": data.get("요약", ""),
-                "Track1_취급유형": data.get("Track1_취급유형", ""), # (A~E)
-                "Track1_위험도": data.get("Track1_위험도", ""),     # (C, H, M, L, N)
-                "Track2_효용코드": data.get("Track2_효용코드", ""), # (Ⅰ-1 ~ Ⅳ-0)
-                "상세 분석결과": data.get("분석결과_상세", ""),
-                "근거 조문": names_str,
-                "AI 신뢰도": data.get("AI_신뢰도", ""),
-                "검토 필요": data.get("검토필요", "X"),
-                "검토 사유": data.get("검토사유", ""),
-                "조문별 다이렉트 링크": links_str
-            }
-            
-            # 🌟 리턴 시 '연관성_판별' 값을 넘겨주어 main.py가 어느 시트로 보낼지 결정하게 함
-            return True, data.get("연관성_판별", "해당없음"), law_info
-            
-        except Exception as e:
-            error_msg = str(e)
-            if "503" in error_msg or "high demand" in error_msg.lower():
-                wait_time = 60 * (attempt + 1)
-                print(f"\n    🚨 [서버 폭주] {wait_time}초 대기 후 재시도합니다...", end="", flush=True)
-            elif "timeout" in error_msg.lower():
-                wait_time = 15 * (attempt + 1)
-                print(f"\n    🚨 [구글 무응답(Timeout)] {wait_time}초 대기 후 재시도...", end="", flush=True)
-            else:
-                wait_time = 15 * (attempt + 1)
-                print(f"\n    🚨 [기타 에러: {error_msg[:30]}...] {wait_time}초 대기...", end="", flush=True)
-                
-            time.sleep(wait_time)
-            
-    return False, "", {"error": error_msg if 'error_msg' in locals() else "재시도 초과"}
+        law_info = {
+            "시행일자": law["시행일자"],
+            "소관부처": law.get("소관부처", ""),
+            "법령명": law["법령명"],
+            "연관성_판별": data.get("연관성_판별", "해당없음"),
+            "관련 종목": data.get("종목", ""),
+            "조문 요약": data.get("요약", ""),
+            "Track1_취급유형": data.get("Track1_취급유형", ""),
+            "Track1_위험도": data.get("Track1_위험도", ""),
+            "Track2_효용코드": data.get("Track2_효용코드", ""),
+            "상세 분석결과": data.get("분석결과_상세", ""),
+            "근거 조문": names_str,
+            "AI 신뢰도": data.get("AI_신뢰도", ""),
+            "검토 필요": data.get("검토필요", "X"),
+            "검토 사유": data.get("검토사유", ""),
+            "조문별 다이렉트 링크": links_str,
+        }
+
+        return True, data.get("연관성_판별", "해당없음"), law_info
+
+    except Exception as e:
+        return False, "", {"error": str(e)}
