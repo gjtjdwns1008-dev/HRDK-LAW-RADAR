@@ -31,6 +31,7 @@ from brain_gemini   import run_ai_analysis
 from report_maker   import (
     upload_to_google_sheet, create_excel_report, send_webhook_with_file,
     export_held_laws_to_sheet, ensure_alias_sheet_exists, read_alias_overrides_from_sheet,
+    init_ledger_baseline, apply_cert_rename_to_ledger,
 )
 
 
@@ -47,13 +48,28 @@ def main():
     # ── 별칭사전 탭 준비 + 담당자가 추가한 별칭 반영 ──────
     ensure_alias_sheet_exists()  # 최초 1회 탭 생성 (이미 있으면 무시)
     try:
-        from hrdk_law_core.certs import register_alias_overrides
+        from hrdk_law_core.certs import register_alias_overrides, resolve_current_name
         overrides = read_alias_overrides_from_sheet()
         if overrides:
             register_alias_overrides(overrides)
             print(f"  🔤 담당자 추가 별칭 {len(overrides)}건 반영")
+            # 🌟 명칭 변경을 SQLite + 구글시트 대장 양쪽에 반영 (방식 B)
+            for old_name, new_name in overrides.items():
+                if old_name == new_name:
+                    continue
+                moved = kb.rename_cert_everywhere(old_name, new_name)  # SQLite 갱신
+                if moved:
+                    print(f"    • SQLite: {old_name} → {new_name} ({moved}건)")
+                    apply_cert_rename_to_ledger(old_name, new_name)    # 구글시트 대장 갱신
     except Exception as e:
         print(f"  ⚠️ 별칭 오버라이드 반영 실패(기본 사전으로 진행): {e}")
+
+    # ── 우대사항 대장 기준선 (최초 1회만 적재) ────────────
+    try:
+        from hrdk_law_core.certs import resolve_current_name as _resolve
+        init_ledger_baseline(kb, resolve_fn=_resolve)
+    except Exception as e:
+        print(f"  ⚠️ 우대사항 대장 기준선 처리 실패: {e}")
 
     try:
         qnet_certs_text = get_qnet_certs_text()  # 🌟 코어 단일 출처에서 종목 로드

@@ -230,6 +230,107 @@ def read_alias_overrides_from_sheet():
 
 
 # ==========================================
+# 1-D. 우대사항 대장 탭 (법령+조문 단위 현황, 방식 B)
+# ==========================================
+LEDGER_SHEET_NAME = "우대사항_대장"
+LEDGER_HEADERS = ["법령명", "조문", "우대분류", "해당 자격종목",
+                  "Track1_취급유형", "Track1_위험도", "Track2_효용코드",
+                  "상태", "최근변경일", "비고"]
+
+
+def _open_spreadsheet():
+    """구글 시트 스프레드시트 객체 반환 (공통 인증)."""
+    if not GCP_SERVICE_ACCOUNT_JSON or not GOOGLE_SHEET_URL:
+        return None
+    creds_dict = json.loads(GCP_SERVICE_ACCOUNT_JSON.strip(), strict=False)
+    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+    client = gspread.authorize(creds)
+    return client.open_by_key(GOOGLE_SHEET_URL)
+
+
+def init_ledger_baseline(kb, resolve_fn=None):
+    """
+    [최초 1회] 우대사항 대장 기준선을 깝니다.
+    이미 데이터가 있으면 건너뜁니다 (덮어쓰기 방지 = 방식 B).
+    """
+    try:
+        ss = _open_spreadsheet()
+        if ss is None:
+            return
+        try:
+            ws = ss.worksheet(LEDGER_SHEET_NAME)
+            existing = ws.get_all_values()
+            if len(existing) > 1:
+                print(f"  ℹ️ 우대사항 대장에 이미 {len(existing)-1}행 존재 → 기준선 적재 생략")
+                return
+        except gspread.WorksheetNotFound:
+            ws = ss.add_worksheet(title=LEDGER_SHEET_NAME, rows=5000, cols=len(LEDGER_HEADERS))
+            ws.append_row(LEDGER_HEADERS)
+
+        rows = kb.build_ledger_rows(resolve_fn=resolve_fn)
+        # 배치로 한 번에 기록 (속도)
+        data = [[r[h] for h in LEDGER_HEADERS] for r in rows]
+        if data:
+            ws.append_rows(data)
+            print(f"  📒 우대사항 대장 기준선 {len(data)}행 적재 완료")
+    except Exception as e:
+        print(f"  ⚠️ 우대사항 대장 기준선 적재 실패: {e}")
+
+
+def apply_cert_rename_to_ledger(old_name, new_name):
+    """
+    [명칭 변경 반영 - 방식 B] 대장에서 옛 종목명이 든 '해당 자격종목' 칸만
+    찾아 현행명으로 교체합니다. 전체 덮어쓰기 없음 → 담당자 메모 보존.
+    반환: 변경된 행 수.
+    """
+    try:
+        ss = _open_spreadsheet()
+        if ss is None:
+            return 0
+        ws = ss.worksheet(LEDGER_SHEET_NAME)
+        records = ws.get_all_values()
+        if len(records) <= 1:
+            return 0
+        header = records[0]
+        try:
+            cert_col = header.index("해당 자격종목")
+            chg_col = header.index("최근변경일")
+        except ValueError:
+            return 0
+
+        from datetime import datetime, timezone, timedelta
+        today = datetime.now(timezone(timedelta(hours=9))).strftime("%Y-%m-%d")
+        changed = 0
+        updates = []
+        for i, row in enumerate(records[1:], start=2):
+            if cert_col < len(row) and old_name in row[cert_col]:
+                # 쉼표 구분 목록에서 정확히 그 종목만 치환
+                certs = [c.strip() for c in row[cert_col].split(",")]
+                new_certs = [new_name if c == old_name else c for c in certs]
+                # 중복 제거
+                seen, dedup = set(), []
+                for c in new_certs:
+                    if c not in seen:
+                        seen.add(c); dedup.append(c)
+                new_val = ", ".join(dedup)
+                col_letter = get_column_letter(cert_col + 1)
+                chg_letter = get_column_letter(chg_col + 1)
+                updates.append({"range": f"{col_letter}{i}", "values": [[new_val]]})
+                updates.append({"range": f"{chg_letter}{i}", "values": [[today]]})
+                changed += 1
+        if updates:
+            ws.batch_update(updates)
+            print(f"  🔤 대장 종목명 변경 반영: {old_name} → {new_name} ({changed}행)")
+        return changed
+    except gspread.WorksheetNotFound:
+        return 0
+    except Exception as e:
+        print(f"  ⚠️ 대장 명칭 변경 반영 실패: {e}")
+        return 0
+
+
+# ==========================================
 # 2. 엑셀 파일 생성 함수 (시트 1개로 단일화)
 # ==========================================
 def create_excel_report(target_laws, target_date=TARGET_DATE):
