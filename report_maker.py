@@ -394,3 +394,59 @@ def send_webhook_with_file(fname, total, high, simple, target_date=TARGET_DATE):
             requests.post(WEBHOOK_URL, data=summary_data)
         print("  ✅ 웹훅 전송 성공!")
     except Exception as e: print(f"  ❌ 웹훅 에러: {e}")
+
+
+def fill_ledger_track_codes(results):
+    """[일회성 보강] 우대사항_대장에서 법령명으로 행을 찾아 Track 코드를 채웁니다.
+    results: [(원본법령명, 상태, 'T1type-T1risk', 'T2', 현행명), ...]
+    '분석완료' 건만 반영. 대장 행의 법령명은 옛 이름일 수 있어 원본명으로 매칭."""
+    if not GCP_SERVICE_ACCOUNT_JSON or not GOOGLE_SHEET_URL:
+        print("  ⚠️ 시트 설정 없음 — 대장 반영 생략")
+        return
+    try:
+        creds_dict = json.loads(GCP_SERVICE_ACCOUNT_JSON.strip(), strict=False)
+        scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+        client = gspread.authorize(creds)
+        ss = client.open_by_key(GOOGLE_SHEET_URL)
+        ws = ss.worksheet(LEDGER_SHEET_NAME)
+
+        all_values = ws.get_all_values()
+        if not all_values:
+            print("  ⚠️ 대장이 비어있음")
+            return
+        header = all_values[0]
+        # 칸 인덱스
+        def col(name):
+            return header.index(name) if name in header else -1
+        i_law = col("법령명")
+        i_t1type = col("Track1_취급유형")
+        i_t1risk = col("Track1_위험도")
+        i_t2 = col("Track2_효용코드")
+        i_note = col("비고")
+        if min(i_law, i_t1type, i_t1risk, i_t2) < 0:
+            print("  ⚠️ 대장 헤더에서 Track 칸을 못 찾음 — 반영 생략")
+            return
+
+        from hrdk_law_core.sheets import get_column_letter
+        # 분석완료 결과만 맵으로
+        code_map = {}
+        for name, status, t1, t2, cur in results:
+            if status == "분석완료":
+                t1type, t1risk = (t1.split("-") + [""])[:2] if t1 else ("", "")
+                code_map[name] = (t1type, t1risk, t2, cur)
+
+        updated = 0
+        for row_i, row in enumerate(all_values[1:], start=2):
+            law = row[i_law] if i_law < len(row) else ""
+            if law in code_map and not (row[i_t1type] if i_t1type < len(row) else ""):
+                t1type, t1risk, t2, cur = code_map[law]
+                ws.update(f"{get_column_letter(i_t1type+1)}{row_i}", [[t1type]], value_input_option="RAW")
+                ws.update(f"{get_column_letter(i_t1risk+1)}{row_i}", [[t1risk]], value_input_option="RAW")
+                ws.update(f"{get_column_letter(i_t2+1)}{row_i}", [[t2]], value_input_option="RAW")
+                if i_note >= 0 and cur and cur != law:
+                    ws.update(f"{get_column_letter(i_note+1)}{row_i}", [[f"AI보강(현행명:{cur})"]], value_input_option="RAW")
+                updated += 1
+        print(f"  ✅ 대장 {updated}개 행에 Track 코드 반영 완료")
+    except Exception as e:
+        print(f"  ⚠️ 대장 Track 코드 반영 실패: {e}")
