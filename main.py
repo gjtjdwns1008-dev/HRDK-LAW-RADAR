@@ -48,7 +48,7 @@ def process_one_day(target_date: str, kb, qnet_certs_text: str) -> bool:
     if not laws:
         print(f"  ℹ️ [{target_date}] 시행 법령 없음 (0건)")
         upload_to_google_sheet(
-            total_len=0, target_laws=[],
+            total_len=0, target_laws=[], target_date=target_date,
             status="🟢 정상 작동 (공포 법령 없음)",
             log=f"{target_date}: 새로 시행되는 국가 법령이 없습니다.",
         )
@@ -163,7 +163,7 @@ def process_one_day(target_date: str, kb, qnet_certs_text: str) -> bool:
         f"직능연={sum(1 for r in target_laws if r.get('hybrid_status')=='직능연_검증')}건, "
         f"신규={sum(1 for r in target_laws if r.get('hybrid_status')=='AI_신규판단')}건"
     )
-    upload_to_google_sheet(len(laws), target_laws, status=status_text, log=log_text)
+    upload_to_google_sheet(len(laws), target_laws, target_date=target_date, status=status_text, log=log_text)
 
     print("📊 엑셀 보고서 생성...")
     excel_filename = create_excel_report(target_laws)
@@ -212,7 +212,9 @@ def main():
         print("❌ 법제처 연결 불가 (오늘은 IP 차단일). 재시도 없이 종료합니다.")
         print("   → 밀린 날짜는 연결되는 다음 날 자동으로 따라잡습니다.")
         try:
-            upload_to_google_sheet(total_len=0, target_laws=[],
+            from datetime import datetime, timezone, timedelta
+            today_kst = datetime.now(timezone(timedelta(hours=9))).strftime("%Y%m%d")
+            upload_to_google_sheet(total_len=0, target_laws=[], target_date=today_kst,
                 status="🔴 법제처 연결 불가 (IP 차단 추정)",
                 log="오늘은 연결 실패. 밀린 날짜는 다음 연결일에 백필됩니다.")
         except Exception:
