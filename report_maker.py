@@ -35,13 +35,19 @@ def upload_to_google_sheet(total_len, target_laws, target_date=TARGET_DATE, stat
         client = gspread.authorize(creds)
         spreadsheet = client.open_by_key(GOOGLE_SHEET_URL)
 
-        # 1) 총괄현황표 로깅 [옵션 B] — 같은 날짜 행에 시도 이력 누적
+        # 1) 총괄현황표 로깅 [옵션 B] — '처리 대상 날짜' 행에 시도 이력 누적
         #    상태 칸 예: "04:13🔴 → 08:47🔴 → 12:31🟢" (한 줄로 그날 이력 전체 확인)
+        #    ⚠️ 행 식별은 '처리 대상 날짜(target_date)'로 — 실행한 날이 아님.
+        #       (6/10을 수동 실행하면 6/10 행에 기록되어야 함. 자동 6/17과 분리)
         try:
-            from datetime import datetime, timezone, timedelta
             from hrdk_law_core.sheets import upsert_daily_summary_row
-            kst = datetime.now(timezone(timedelta(hours=9)))
-            display_date = kst.strftime("%Y-%m-%d")
+            # target_date(YYYYMMDD)를 표시용(YYYY-MM-DD)으로 변환
+            if target_date and len(str(target_date)) == 8:
+                display_date = f"{target_date[:4]}-{target_date[4:6]}-{target_date[6:]}"
+            else:
+                # 대상 날짜를 모르는 경우(연결 실패 등)에만 오늘 날짜 사용
+                from datetime import datetime, timezone, timedelta
+                display_date = datetime.now(timezone(timedelta(hours=9))).strftime("%Y-%m-%d")
             # status 문자열에서 심볼만 추출
             symbol = "🟢"
             for s in ("🔴", "🟡", "🟢"):
