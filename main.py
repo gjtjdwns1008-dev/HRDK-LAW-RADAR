@@ -51,7 +51,7 @@ def process_one_day(target_date: str, kb, qnet_certs_text: str, run_note: str = 
         upload_to_google_sheet(
             total_len=0, target_laws=[], target_date=target_date,
             status="🟢 정상 작동 (공포 법령 없음)",
-            log=f"{run_note}{target_date}: 새로 시행되는 국가 법령이 없습니다.",
+            log=f"{run_note}새로 시행되는 국가 법령이 없습니다.",
         )
         return True
 
@@ -159,7 +159,7 @@ def process_one_day(target_date: str, kb, qnet_certs_text: str, run_note: str = 
     ai_fail_count = sum(1 for r in all_results if "AI 분석 최종 실패" in str(r.get("상세 분석결과", "")))
     status_text = "🟡 부분 지연/실패" if ai_fail_count > 0 else "🟢 정상 작동"
     log_text = (
-        f"{run_note}{target_date}: 총 {len(laws)}건 중 {len(target_laws)}건 매칭. AI실패 {ai_fail_count}건. "
+        f"{run_note}총 {len(laws)}건 중 {len(target_laws)}건 매칭. AI실패 {ai_fail_count}건. "
         f"기준조항={sum(1 for r in target_laws if r.get('hybrid_status','').startswith('기준조항'))}건, "
         f"직능연={sum(1 for r in target_laws if r.get('hybrid_status')=='직능연_검증')}건, "
         f"신규={sum(1 for r in target_laws if r.get('hybrid_status')=='AI_신규판단')}건"
@@ -223,12 +223,12 @@ def main():
             try:
                 upload_to_google_sheet(total_len=0, target_laws=[], target_date=manual_date,
                     status="🔴 법제처 연결 불가 (IP 차단 추정)",
-                    log=f"[수동 {run_day} 실행] 법제처 연결 실패. 되는 날 재시도 필요.")
+                    log="[수동 실행] 법제처 연결 실패. 되는 날 재시도 필요.")
             except Exception:
                 pass
             sys.exit(1)
         qnet_certs_text = get_qnet_certs_text()
-        ok = process_one_day(manual_date, kb, qnet_certs_text, run_note=f"[수동 {run_day} 실행] ")
+        ok = process_one_day(manual_date, kb, qnet_certs_text, run_note="[수동 실행] ")
         # ⚠️ mark_done 호출하지 않음 — 수동 실행이 자동 백필을 꼬이게 하면 안 됨
         print(f"\n🎉 [수동 실행 종료] {manual_date} 처리 {'성공' if ok else '실패'}")
         if not ok:
