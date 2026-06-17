@@ -35,26 +35,27 @@ def upload_to_google_sheet(total_len, target_laws, target_date=TARGET_DATE, stat
         client = gspread.authorize(creds)
         spreadsheet = client.open_by_key(GOOGLE_SHEET_URL)
 
-        # 1) 총괄현황표 로깅
-        # 🌟 [요구사항 반영] 총괄현황표 실시간 타임스탬프 관제 로깅
+        # 1) 총괄현황표 로깅 [옵션 B] — 같은 날짜 행에 시도 이력 누적
+        #    상태 칸 예: "04:13🔴 → 08:47🔴 → 12:31🟢" (한 줄로 그날 이력 전체 확인)
         try:
-            summary_sheet = spreadsheet.worksheet("총괄현황표")
-            
-            # 한국 시간(KST) 기준으로 초 단위까지 정확하게 구하기
             from datetime import datetime, timezone, timedelta
-            current_now = datetime.now(timezone(timedelta(hours=9)))
-            current_time_str = current_now.strftime("%Y-%m-%d %H:%M:%S")
-            
-            # 확장된 5대 통합 헤더 규격에 맞춰 한 줄 적재
-            summary_row = [
-                current_time_str,    # 1. 수집일자 (초 단위 시간 포함 🌟)
-                total_len,           # 2. 총 검토건수
-                len(target_laws),    # 3. 연관 법령건수
-                status,              # 4. 모니터링 상태 (정상/에러 표기 🌟)
-                log                  # 5. 실행 로그 및 비고 (상세 내용 표기 🌟)
-            ]
-            summary_sheet.append_row(summary_row)
-            print(f"  📊 [총괄현황표 관제 기록 성공] 상태: {status}")
+            from hrdk_law_core.sheets import upsert_daily_summary_row
+            kst = datetime.now(timezone(timedelta(hours=9)))
+            display_date = kst.strftime("%Y-%m-%d")
+            # status 문자열에서 심볼만 추출
+            symbol = "🟢"
+            for s in ("🔴", "🟡", "🟢"):
+                if s in status:
+                    symbol = s
+                    break
+            upsert_daily_summary_row(
+                spreadsheet,
+                sheet_name="총괄현황표",
+                target_date_display=display_date,
+                cols_before_status=[display_date, total_len, len(target_laws)],
+                status_symbol=symbol,
+                log=log,
+            )
         except Exception as e:
             print(f"  ⚠️ 총괄현황표 관제 데이터 기록 실패: {e}")
 
