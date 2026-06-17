@@ -25,7 +25,7 @@ from hrdk_law_core.certs    import get_qnet_certs_text, get_relevant_certs_text,
 from hrdk_law_core.worknet  import get_worknet_job_count
 from hrdk_law_core.db       import KnowledgeBase
 from hrdk_law_core.hybrid   import verify_with_krivet
-from hrdk_law_core.backfill import check_law_reachable, pending_dates, mark_done
+from hrdk_law_core.backfill import check_law_reachable, pending_dates, mark_done, is_valid_target_date
 
 from brain_gemini   import run_ai_analysis
 from report_maker   import (
@@ -219,6 +219,21 @@ def main():
             pass
         sys.exit(1)
     print("✅ 법제처 연결 확인됨. 처리 시작.")
+
+    # ── [수동 실행 모드] 특정 일자만 처리 (백필 상태 건드리지 않음) ──
+    manual_date = os.environ.get("MANUAL_DATE", "").strip()
+    if manual_date:
+        if not is_valid_target_date(manual_date):
+            print(f"❌ 잘못된 날짜: '{manual_date}'. YYYYMMDD 형식의 과거(또는 오늘) 날짜여야 합니다.")
+            sys.exit(1)
+        print(f"🔧 [수동 실행] {manual_date} 한 날짜만 처리합니다. (자동 백필 상태는 변경하지 않음)")
+        qnet_certs_text = get_qnet_certs_text()
+        ok = process_one_day(manual_date, kb, qnet_certs_text)
+        # ⚠️ mark_done 호출하지 않음 — 수동 실행이 자동 백필을 꼬이게 하면 안 됨
+        print(f"\n🎉 [수동 실행 종료] {manual_date} 처리 {'성공' if ok else '실패'}")
+        if not ok:
+            sys.exit(1)
+        return
 
     # ── 2. 밀린 날짜 계산 ─────────────────────────────────
     dates = pending_dates(kb)
