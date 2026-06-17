@@ -27,6 +27,14 @@ jobs:
         git config --global url."https://x-access-token:${GITHUB_TOKEN}@github.com/".insteadOf "https://github.com/"
         pip install -r requirements.txt
 
+    - name: 🌐 [진단] 이번 실행 서버 IP 확인
+      run: |
+        echo "=================================================="
+        echo "이번 GitHub Actions 실행 서버의 IP 정보"
+        echo "=================================================="
+        curl -s --max-time 10 https://ipinfo.io/json | grep -E '"ip"|"city"|"country"|"org"' || echo "IP 조회 실패"
+        echo "=================================================="
+
     - name: 🚀 HRDK LAW-RADAR 메인 스크립트 실행 (법제처 타임아웃 시 최대 3회 자동 재시도)
       env:
         LAW_API_KEY: ${{ secrets.LAW_API_KEY }}
@@ -41,6 +49,10 @@ jobs:
         # python main.py가 종료코드 0(성공)을 내면 즉시 break, 1(실패)이면 대기 후 재시도.
         for i in 1 2 3; do
           echo "🔄 실행 시도 $i/3..."
+          # 시도마다 법제처 연결 가능 여부를 IP와 함께 기록 (들쭉날쭉 현상 추적용)
+          MYIP=$(curl -s --max-time 10 https://ipinfo.io/ip || echo "unknown")
+          LAW_HTTP=$(curl -s --max-time 20 -o /dev/null -w "%{http_code}" https://www.law.go.kr || echo "TIMEOUT")
+          echo "    🌐 [시도 $i] IP=$MYIP / 법제처 연결=$LAW_HTTP"
           python main.py && break
           if [ $i -lt 3 ]; then
             echo "⏳ 법제처 서버 회복 대기 중... 5분 후 재시도합니다."
