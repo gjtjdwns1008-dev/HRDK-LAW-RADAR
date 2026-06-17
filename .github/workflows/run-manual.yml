@@ -1,0 +1,51 @@
+name: "수동 실행 - 특정일자 분석 (RADAR)"
+
+# 통신 오류 등으로 누락된 특정 일자를 수동으로 다시 돌릴 때 사용합니다.
+# Actions 탭 → 'Run workflow' → 날짜(YYYYMMDD) 입력 → 실행.
+# 기존 Secrets를 그대로 사용하므로 별도 설정이 필요 없습니다.
+on:
+  workflow_dispatch:
+    inputs:
+      target_date:
+        description: "처리할 날짜 (YYYYMMDD 형식, 예: 20260615)"
+        required: true
+        type: string
+
+jobs:
+  manual-run:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: 📂 소스 코드 가져오기
+      uses: actions/checkout@v4
+
+    - name: 🐍 파이썬 환경 세팅
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: 📦 필수 라이브러리 설치
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        python -m pip install --upgrade pip
+        git config --global url."https://x-access-token:${GITHUB_TOKEN}@github.com/".insteadOf "https://github.com/"
+        pip install -r requirements.txt
+
+    - name: 🌐 [진단] 실행 IP 확인
+      run: |
+        echo "IP: $(curl -s --max-time 10 https://ipinfo.io/ip || echo unknown)"
+
+    - name: "🔧 특정일자 수동 실행"
+      env:
+        LAW_API_KEY: ${{ secrets.LAW_API_KEY }}
+        GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
+        GOOGLE_SHEET_URL: ${{ secrets.GOOGLE_SHEET_URL }}
+        GCP_SERVICE_ACCOUNT_JSON: ${{ secrets.GCP_SERVICE_ACCOUNT_JSON }}
+        WORKNET_API_KEY: ${{ secrets.WORKNET_API_KEY }}
+        DB_PATH: hrdk_law.db
+        MANUAL_DATE: ${{ inputs.target_date }}
+      run: |
+        echo "🔧 수동 실행 날짜: $MANUAL_DATE"
+        python main.py
