@@ -9,6 +9,26 @@ from openpyxl.styles import Alignment, PatternFill, Font, Border, Side
 # 💡 1단계 config 파일에서 설정값들을 가져옵니다.
 from config import COLUMNS, WEBHOOK_URL, GCP_SERVICE_ACCOUNT_JSON, GOOGLE_SHEET_URL, TARGET_DATE
 
+# 🌟 Track 코드 → 한글 병기 (구글 시트 표기용. SQLite엔 순수 코드 유지)
+from hrdk_law_core.certs import label_track1_type, label_track1_risk, label_track2_code
+
+# 시트에 병기로 표기할 Track 칸 이름
+_TRACK_LABELERS = {
+    "Track1_취급유형": label_track1_type,
+    "Track1_위험도": label_track1_risk,
+    "Track2_효용코드": label_track2_code,
+}
+
+def _row_for_sheet(info, columns):
+    """COLUMNS 순서대로 행을 만들되, Track 칸은 한글 병기로 변환해 시트에 표기.
+    (info 원본은 안 건드림 → SQLite 저장은 순수 코드 유지)"""
+    row = []
+    for c in columns:
+        val = info.get(c, "")
+        labeler = _TRACK_LABELERS.get(c)
+        row.append(labeler(val) if labeler else val)
+    return row
+
 # 🌟 [신설 헬퍼] 숫자를 엑셀 열 문자(1->A, 17->Q)로 변환해주는 함수
 def get_column_letter(n):
     string = ""
@@ -98,7 +118,7 @@ def upload_to_google_sheet(total_len, target_laws, target_date=TARGET_DATE, stat
                         row_idx = natural_key_map[nat_key]
                         existing_id = existing_records[row_idx - 2].get("MST_ID", "")
                         info["MST_ID"] = existing_id 
-                        row_data = [info.get(c, "") for c in COLUMNS]
+                        row_data = _row_for_sheet(info, COLUMNS)
                         
                         # 🌟 하드코딩(A~O)을 유연한 계산식(A~Q)으로 변경하여 워크넷 데이터 누락 방지!
                         ws_main.update(f'A{row_idx}:{end_col_letter}{row_idx}', [row_data]) 
@@ -108,7 +128,7 @@ def upload_to_google_sheet(total_len, target_laws, target_date=TARGET_DATE, stat
                         max_id_num += 1
                         new_id = f"HRDK-L-{max_id_num:04d}" 
                         info["MST_ID"] = new_id
-                        row_data = [info.get(c, "") for c in COLUMNS]
+                        row_data = _row_for_sheet(info, COLUMNS)
                         new_rows_to_append.append(row_data)
                         print(f"  ✨ [Insert] {new_id}")
 
@@ -298,7 +318,7 @@ def init_ledger_baseline(kb, resolve_fn=None):
 
         rows = kb.build_ledger_rows(resolve_fn=resolve_fn)
         # 배치로 한 번에 기록 (속도)
-        data = [[r[h] for h in LEDGER_HEADERS] for r in rows]
+        data = [_row_for_sheet(r, LEDGER_HEADERS) for r in rows]
         if data:
             ws.append_rows(data)
             print(f"  📒 우대사항 대장 기준선 {len(data)}행 적재 완료")
@@ -368,7 +388,7 @@ def create_excel_report(target_laws, target_date=TARGET_DATE):
     
     ws1.append(COLUMNS)
     for row_idx, info in enumerate(target_laws, 2):
-        ws1.append([info.get(c, "") for c in COLUMNS])
+        ws1.append(_row_for_sheet(info, COLUMNS))
     for col in ws1.columns:
         ws1.column_dimensions[col[0].column_letter].width = 20
 
