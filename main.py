@@ -1,11 +1,13 @@
 """
-HRDK LAW-RADAR - main.py (Phase 1 업데이트)
+HRDK LAW-RADAR - main.py (백필 구조판)
 --------------------------------------------
-변경 사항:
-  - law_scrapper.py → hrdk_law_core.scraper (공유 코어)
-  - worknet_api.py  → hrdk_law_core.worknet  (공유 코어)
-  - 하이브리드 검증 (직능연 × AI 투트랙) 신규 추가
-  - SQLite 지식베이스 daily_analysis 누적 저장 신규 추가
+🌟 백필(Backfill) 전략:
+  법제처 IP 차단으로 며칠 건너뛰어도, 연결되는 날 밀린 날짜를 모두 따라잡습니다.
+  - 시작 시 연결 확인 → 안 되면 즉시 종료 (재시도로 시간 낭비 안 함)
+  - 마지막 성공일+1 ~ 어제까지 과거→현재 순으로 처리
+구조:
+  main()           - 1회 초기화(별칭·대장) + 연결확인 + 밀린 날짜 순회
+  process_one_day()- 하루치 수집·분석·워크넷·하이브리드·저장·보고
 """
 
 import os
@@ -13,20 +15,18 @@ import time
 import sys
 
 from config import (
-    TARGET_DATE,
     LAW_API_KEY, WORKNET_API_KEY,
     GCP_SERVICE_ACCOUNT_JSON, GOOGLE_SHEET_URL,
-    DB_PATH,          # ← config.py에 추가 필요 (기본값: "hrdk_law.db")
+    DB_PATH,
 )
 
-# ── 공유 코어 임포트 ─────────────────────────────────────
 from hrdk_law_core.scraper  import get_base_laws
 from hrdk_law_core.certs    import get_qnet_certs_text, get_relevant_certs_text, detect_name_change_signal
 from hrdk_law_core.worknet  import get_worknet_job_count
 from hrdk_law_core.db       import KnowledgeBase
 from hrdk_law_core.hybrid   import verify_with_krivet
+from hrdk_law_core.backfill import check_law_reachable, pending_dates, mark_done
 
-# ── 기존 모듈 (변경 없음) ────────────────────────────────
 from brain_gemini   import run_ai_analysis
 from report_maker   import (
     upload_to_google_sheet, create_excel_report, send_webhook_with_file,
@@ -35,235 +35,222 @@ from report_maker   import (
 )
 
 
+def process_one_day(target_date: str, kb, qnet_certs_text: str) -> bool:
+    """하루치 수집·분석·저장·보고. 반환: 성공 여부(수집 실패 시 False)."""
+    print(f"\n{'='*50}\n📅 [{target_date}] 처리 시작\n{'='*50}")
+
+    laws = get_base_laws(api_key=LAW_API_KEY, target_date=target_date)
+
+    if laws is None:
+        print(f"  ❌ [{target_date}] 법제처 수집 실패 (다음 기회에 재시도)")
+        return False
+
+    if not laws:
+        print(f"  ℹ️ [{target_date}] 시행 법령 없음 (0건)")
+        upload_to_google_sheet(
+            total_len=0, target_laws=[],
+            status="🟢 정상 작동 (공포 법령 없음)",
+            log=f"{target_date}: 새로 시행되는 국가 법령이 없습니다.",
+        )
+        return True
+
+    target_laws, failed_queue, all_results = [], [], []
+
+    print(f"\n🏎️  총 {len(laws)}건 분석 시작...")
+    for idx, law in enumerate(laws):
+        print(f"  [{idx+1}/{len(laws)}] 🔍 {law['법령명']}")
+        t0 = time.time()
+
+        if law.get("스킵여부"):
+            hold_reason = law.get("스킵사유", "조직/직제 관련")
+            print(f"    ⏩ [보류: {hold_reason}]")
+            try:
+                kb.add_held_law(
+                    law_name=law["법령명"], enforce_date=law.get("시행일자", ""),
+                    ministry=law.get("소관부처", ""), hold_reason=hold_reason,
+                    law_link=law.get("링크", ""),
+                )
+            except Exception as he:
+                print(f"      ⚠️ 보류 로그 기록 실패: {he}")
+            all_results.append({
+                "시행일자": law["시행일자"], "법령명": law["법령명"],
+                "상세 분석결과": f"AI 분석 보류 ({hold_reason})",
+                "연관성_판별": "해당없음", "검토 필요": "X",
+                "조문별 다이렉트 링크": law["링크"],
+            })
+            continue
+
+        success, is_related, law_info = run_ai_analysis(law, get_relevant_certs_text(law.get("원본", "")))
+        elapsed = time.time() - t0
+
+        # 🌟 [B 알림] 자격 명칭 변경 의심 감지
+        if detect_name_change_signal(law.get("법령명", ""), law.get("원본", "")):
+            print(f"    🔔 [명칭변경 의심] '{law['법령명']}' — 변천사 업데이트 검토 필요")
+            try:
+                kb.add_held_law(
+                    law_name=law["법령명"], enforce_date=law.get("시행일자", ""),
+                    ministry=law.get("소관부처", ""),
+                    hold_reason="⚠️ 자격명칭 변경 의심 — 변천사 자료 업데이트 검토 필요",
+                    law_link=law.get("링크", ""),
+                )
+            except Exception:
+                pass
+
+        if success:
+            if is_related != "해당없음":
+                print(f"    📞 워크넷 수요 조회 중... ({law_info.get('관련 종목')})")
+                job_demand = get_worknet_job_count(law_info.get("관련 종목", ""), api_key=WORKNET_API_KEY)
+                law_info["워크넷_실시간_구인건수"] = job_demand
+                law_info = verify_with_krivet(law_info, kb)
+                hybrid_tag = {
+                    "기준조항_확정": "📌 기준조항", "기준조항_보정": "📌 기준조항(보정)",
+                    "직능연_검증": "✅ 직능연", "AI_스마트_보정": "💡 AI보정", "AI_신규판단": "🆕 신규",
+                }.get(law_info.get("hybrid_status", ""), "")
+                target_laws.append(law_info)
+                print(f"    ✅ 관련 법령 ({elapsed:.1f}초) [구인:{job_demand}] [{hybrid_tag}]")
+            else:
+                law_info["워크넷_실시간_구인건수"] = "-"
+                print(f"    ❌ 해당없음 ({elapsed:.1f}초)")
+            all_results.append(law_info)
+        else:
+            law["error_msg"] = law_info.get("error", "알 수 없음")
+            failed_queue.append(law)
+            print(f"    ⏩ [분석 실패: {law['error_msg']}] ({elapsed:.1f}초)")
+
+    # 패자부활전
+    if failed_queue:
+        print(f"\n🚑 패자부활전 {len(failed_queue)}건... (20초 대기)")
+        time.sleep(20)
+        for law in failed_queue:
+            print(f"  [재시도] {law['법령명']}... ", end="", flush=True)
+            success, is_related, law_info = run_ai_analysis(law, get_relevant_certs_text(law.get("원본", "")), attempt_count=3)
+            if success:
+                if is_related != "해당없음":
+                    job_demand = get_worknet_job_count(law_info.get("관련 종목", ""), api_key=WORKNET_API_KEY)
+                    law_info["워크넷_실시간_구인건수"] = job_demand
+                    law_info = verify_with_krivet(law_info, kb)
+                    target_laws.append(law_info)
+                    print(f"✅ (구인:{job_demand}) [{law_info.get('hybrid_status','')}]")
+                else:
+                    law_info["워크넷_실시간_구인건수"] = "-"
+                    print("❌ (해당없음)")
+                all_results.append(law_info)
+            else:
+                final_err = law.get("error_msg", "Gemini 크레딧 소진")
+                print(f"💀 [최종 실패] {final_err}")
+                all_results.append({
+                    "시행일자": law["시행일자"], "법령명": law["법령명"],
+                    "상세 분석결과": f"AI 분석 최종 실패 (사유: {final_err})",
+                    "연관성_판별": "해당없음", "검토 필요": "O", "워크넷_실시간_구인건수": "-",
+                })
+
+    # SQLite 저장
+    if target_laws:
+        print(f"\n💾 SQLite 누적 저장... ({len(target_laws)}건)")
+        for law_info in target_laws:
+            try:
+                kb.upsert_daily(law_info)
+            except Exception as e:
+                print(f"  ⚠️ SQLite 저장 실패 ({law_info.get('법령명', '')}): {e}")
+
+    # 구글 시트 & 보고서
+    print("\n📝 구글 시트 적재...")
+    ai_fail_count = sum(1 for r in all_results if "AI 분석 최종 실패" in str(r.get("상세 분석결과", "")))
+    status_text = "🟡 부분 지연/실패" if ai_fail_count > 0 else "🟢 정상 작동"
+    log_text = (
+        f"{target_date}: 총 {len(laws)}건 중 {len(target_laws)}건 매칭. AI실패 {ai_fail_count}건. "
+        f"기준조항={sum(1 for r in target_laws if r.get('hybrid_status','').startswith('기준조항'))}건, "
+        f"직능연={sum(1 for r in target_laws if r.get('hybrid_status')=='직능연_검증')}건, "
+        f"신규={sum(1 for r in target_laws if r.get('hybrid_status')=='AI_신규판단')}건"
+    )
+    upload_to_google_sheet(len(laws), target_laws, status=status_text, log=log_text)
+
+    print("📊 엑셀 보고서 생성...")
+    excel_filename = create_excel_report(target_laws)
+    print("🚀 웹훅 전송...")
+    send_webhook_with_file(excel_filename, len(laws), len(target_laws), 0)
+
+    print("📋 보류목록 시트 반영...")
+    export_held_laws_to_sheet(kb)
+    return True
 
 
 def main():
-    print(f"🚀 [HRDK LAW-RADAR] {TARGET_DATE} 데이터 수집 및 분석 시작...\n" + "=" * 50)
+    print("🚀 [HRDK LAW-RADAR] 시작\n" + "=" * 50)
     start_time = time.time()
 
-    # ── 지식베이스 로드 ──────────────────────────────────
     kb = KnowledgeBase(DB_PATH)
     print(f"📚 지식베이스 로드 완료 ({DB_PATH})")
 
-    # ── 별칭사전 탭 준비 + 담당자가 추가한 별칭 반영 ──────
-    ensure_alias_sheet_exists()  # 최초 1회 탭 생성 (이미 있으면 무시)
+    # ── [1회 초기화] 별칭사전 + 명칭변경 양쪽 반영 ────────
+    ensure_alias_sheet_exists()
     try:
-        from hrdk_law_core.certs import register_alias_overrides, resolve_current_name
+        from hrdk_law_core.certs import register_alias_overrides
         overrides = read_alias_overrides_from_sheet()
         if overrides:
             register_alias_overrides(overrides)
             print(f"  🔤 담당자 추가 별칭 {len(overrides)}건 반영")
-            # 🌟 명칭 변경을 SQLite + 구글시트 대장 양쪽에 반영 (방식 B)
             for old_name, new_name in overrides.items():
                 if old_name == new_name:
                     continue
-                moved = kb.rename_cert_everywhere(old_name, new_name)  # SQLite 갱신
+                moved = kb.rename_cert_everywhere(old_name, new_name)
                 if moved:
                     print(f"    • SQLite: {old_name} → {new_name} ({moved}건)")
-                    apply_cert_rename_to_ledger(old_name, new_name)    # 구글시트 대장 갱신
+                    apply_cert_rename_to_ledger(old_name, new_name)
     except Exception as e:
-        print(f"  ⚠️ 별칭 오버라이드 반영 실패(기본 사전으로 진행): {e}")
+        print(f"  ⚠️ 별칭 오버라이드 반영 실패: {e}")
 
-    # ── 우대사항 대장 기준선 (최초 1회만 적재) ────────────
+    # ── [1회 초기화] 우대사항 대장 기준선 ─────────────────
     try:
         from hrdk_law_core.certs import resolve_current_name as _resolve
         init_ledger_baseline(kb, resolve_fn=_resolve)
     except Exception as e:
         print(f"  ⚠️ 우대사항 대장 기준선 처리 실패: {e}")
 
-    try:
-        qnet_certs_text = get_qnet_certs_text()  # 🌟 코어 단일 출처에서 종목 로드
-
-        # ═══════════════════════════════════════════════════
-        # 1. 법령 수집 (공유 코어 사용)
-        # ═══════════════════════════════════════════════════
-        laws = get_base_laws(api_key=LAW_API_KEY, target_date=TARGET_DATE)
-
-        if laws is None:
-            err_msg = "법제처 서버 연결 완전 실패. 안전하게 종료합니다."
-            print(f"❌ [결정적 오류] {err_msg}")
-            upload_to_google_sheet(
-                total_len=0, target_laws=[],
-                status="🔴 시스템 에러 (법제처 API)", log=err_msg,
-            )
-            sys.exit(1)  # 🛠️ [타임아웃 재시도 패치] return → sys.exit(1)
-            # 종료코드 1 = 워크플로우가 "실패"로 인식 → main.yml 재시도 루프 트리거
-
-        if not laws:
-            print(f"  ℹ️ {TARGET_DATE} 시행 법령 없음. (0건 처리)")
-            upload_to_google_sheet(
-                total_len=0, target_laws=[],
-                status="🟢 정상 작동 (공포 법령 없음)",
-                log="해당 일자에 새로 시행되는 국가 법령이 없습니다.",
-            )
-            send_webhook_with_file(create_excel_report([]), 0, 0, 0)
-            return
-
-        target_laws, failed_queue, all_results = [], [], []
-
-        # ═══════════════════════════════════════════════════
-        # 2. AI 정밀 분석 루프
-        # ═══════════════════════════════════════════════════
-        print(f"\n🏎️  총 {len(laws)}건 분석 시작...")
-        for idx, law in enumerate(laws):
-            print(f"  [{idx+1}/{len(laws)}] 🔍 {law['법령명']} (Gemini 전송 중...)")
-            t0 = time.time()
-
-            if law.get("스킵여부"):
-                hold_reason = law.get("스킵사유", "조직/직제 관련")
-                print(f"    ⏩ [보류: {hold_reason}] (삭제 아님, 보류 로그에 기록)")
-                # 🌟 [버리지 않는 체] AI는 건너뛰되 사유와 함께 DB에 보존
-                try:
-                    kb.add_held_law(
-                        law_name=law["법령명"],
-                        enforce_date=law.get("시행일자", ""),
-                        ministry=law.get("소관부처", ""),
-                        hold_reason=hold_reason,
-                        law_link=law.get("링크", ""),
-                    )
-                except Exception as he:
-                    print(f"      ⚠️ 보류 로그 기록 실패: {he}")
-                all_results.append({
-                    "시행일자": law["시행일자"], "법령명": law["법령명"],
-                    "상세 분석결과": f"AI 분석 보류 ({hold_reason})",
-                    "연관성_판별": "해당없음", "검토 필요": "X",
-                    "조문별 다이렉트 링크": law["링크"],
-                })
-                continue
-
-            success, is_related, law_info = run_ai_analysis(law, get_relevant_certs_text(law.get("원본", "")))
-            elapsed = time.time() - t0
-
-            # 🌟 [B 알림] 자격 명칭 변경 의심 감지 → 변천사 업데이트 필요 알림 (자동변경 X)
-            if detect_name_change_signal(law.get("법령명", ""), law.get("원본", "")):
-                print(f"    🔔 [명칭변경 의심] '{law['법령명']}' — 변천사(cert_aliases) 업데이트 검토 필요")
-                try:
-                    kb.add_held_law(
-                        law_name=law["법령명"],
-                        enforce_date=law.get("시행일자", ""),
-                        ministry=law.get("소관부처", ""),
-                        hold_reason="⚠️ 자격명칭 변경 의심 — 변천사 자료 업데이트 검토 필요",
-                        law_link=law.get("링크", ""),
-                    )
-                except Exception:
-                    pass
-
-            if success:
-                if is_related != "해당없음":
-                    # ── 워크넷 매쉬업 (공유 코어 사용) ──
-                    print(f"    📞 워크넷 수요 조회 중... ({law_info.get('관련 종목')})")
-                    job_demand = get_worknet_job_count(
-                        law_info.get("관련 종목", ""), api_key=WORKNET_API_KEY
-                    )
-                    law_info["워크넷_실시간_구인건수"] = job_demand
-
-                    # ── 🌟 [신규] 하이브리드 검증 ──────
-                    law_info = verify_with_krivet(law_info, kb)
-                    hybrid_tag = {
-                        "직능연_검증":  "✅ 직능연_검증",
-                        "AI_스마트_보정": "💡 AI_보정",
-                        "AI_신규판단":  "🆕 신규",
-                    }.get(law_info.get("hybrid_status", ""), "")
-
-                    target_laws.append(law_info)
-                    print(f"    ✅ 관련 법령 식별 ({elapsed:.1f}초) [구인: {job_demand}] [{hybrid_tag}]")
-                else:
-                    law_info["워크넷_실시간_구인건수"] = "-"
-                    print(f"    ❌ 해당없음 ({elapsed:.1f}초)")
-
-                all_results.append(law_info)
-            else:
-                law["error_msg"] = law_info.get("error", "알 수 없음")
-                failed_queue.append(law)
-                print(f"    ⏩ [분석 실패: {law['error_msg']}] ({elapsed:.1f}초)")
-
-        # ═══════════════════════════════════════════════════
-        # 3. 패자부활전
-        # ═══════════════════════════════════════════════════
-        if failed_queue:
-            print(f"\n🚑 패자부활전 {len(failed_queue)}건 시작... (20초 대기)")
-            time.sleep(20)
-            for law in failed_queue:
-                print(f"  [재시도] {law['법령명']}... ", end="", flush=True)
-                success, is_related, law_info = run_ai_analysis(law, get_relevant_certs_text(law.get("원본", "")), attempt_count=3)
-                if success:
-                    if is_related != "해당없음":
-                        job_demand = get_worknet_job_count(
-                            law_info.get("관련 종목", ""), api_key=WORKNET_API_KEY
-                        )
-                        law_info["워크넷_실시간_구인건수"] = job_demand
-                        law_info = verify_with_krivet(law_info, kb)
-                        target_laws.append(law_info)
-                        print(f"✅ (구인: {job_demand}) [{law_info.get('hybrid_status','')}]")
-                    else:
-                        law_info["워크넷_실시간_구인건수"] = "-"
-                        print("❌ (해당없음)")
-                    all_results.append(law_info)
-                else:
-                    final_err = law.get("error_msg", "Gemini 크레딧 소진")
-                    print(f"💀 [최종 실패] {final_err}")
-                    all_results.append({
-                        "시행일자": law["시행일자"], "법령명": law["법령명"],
-                        "상세 분석결과": f"AI 분석 최종 실패 (사유: {final_err})",
-                        "연관성_판별": "해당없음", "검토 필요": "O",
-                        "워크넷_실시간_구인건수": "-",
-                    })
-
-        # ═══════════════════════════════════════════════════
-        # 4. SQLite 지식베이스 누적 저장 (신규)
-        # ═══════════════════════════════════════════════════
-        if target_laws:
-            print(f"\n💾 SQLite 지식베이스 누적 저장 중... ({len(target_laws)}건)")
-            for law_info in target_laws:
-                try:
-                    kb.upsert_daily(law_info)
-                except Exception as e:
-                    print(f"  ⚠️ SQLite 저장 실패 ({law_info.get('법령명', '')}): {e}")
-            print("  ✅ SQLite 저장 완료")
-
-        # ═══════════════════════════════════════════════════
-        # 5. 구글 시트 & 보고서 (기존과 동일)
-        # ═══════════════════════════════════════════════════
-        print("\n📝 구글 시트 마스터 DB 적재 시작...")
-        ai_fail_count = sum(
-            1 for r in all_results if "AI 분석 최종 실패" in str(r.get("상세 분석결과", ""))
-        )
-        status_text = "🟡 부분 지연/실패" if ai_fail_count > 0 else "🟢 정상 작동"
-        log_text = (
-            f"총 {len(laws)}건 중 {len(target_laws)}건 매칭. "
-            f"AI 실패 {ai_fail_count}건. "
-            f"하이브리드: "
-            f"직능연검증={sum(1 for r in target_laws if r.get('hybrid_status')=='직능연_검증')}건, "
-            f"AI보정={sum(1 for r in target_laws if r.get('hybrid_status')=='AI_스마트_보정')}건, "
-            f"신규={sum(1 for r in target_laws if r.get('hybrid_status')=='AI_신규판단')}건"
-        )
-
-        upload_to_google_sheet(len(laws), target_laws, status=status_text, log=log_text)
-
-        print("\n📊 보고용 엑셀 파일 생성 중...")
-        excel_filename = create_excel_report(target_laws)
-
-        print("\n🚀 Make.com 웹훅 전송 시작...")
-        send_webhook_with_file(excel_filename, len(laws), len(target_laws), 0)
-
-        # 🌟 보류목록을 구글 시트 탭으로 내보내기 (담당자 확인용)
-        print("\n📋 보류목록 시트 반영 중...")
-        export_held_laws_to_sheet(kb)
-
-        elapsed_total = time.time() - start_time
-        print(f"\n🎉 [종료] 완료! (소요 시간: {elapsed_total / 60:.1f}분)")
-
-    except Exception as e:
-        fatal_msg = f"런타임 에러: {str(e)}"
-        print(f"\n💥 [치명적 오류] {fatal_msg}")
+    # ── 1. 오늘이 '되는 날'인지 확인 ──────────────────────
+    if not check_law_reachable(LAW_API_KEY):
+        print("❌ 법제처 연결 불가 (오늘은 IP 차단일). 재시도 없이 종료합니다.")
+        print("   → 밀린 날짜는 연결되는 다음 날 자동으로 따라잡습니다.")
         try:
-            upload_to_google_sheet(
-                total_len=0, target_laws=[],
-                status="🔴 시스템 에러 (런타임 실패)",
-                log=fatal_msg[:400],
-            )
-        except Exception as sheet_err:
-            print(f"  ❌ 구글 시트 로깅도 실패: {sheet_err}")
+            upload_to_google_sheet(total_len=0, target_laws=[],
+                status="🔴 법제처 연결 불가 (IP 차단 추정)",
+                log="오늘은 연결 실패. 밀린 날짜는 다음 연결일에 백필됩니다.")
+        except Exception:
+            pass
+        sys.exit(1)
+    print("✅ 법제처 연결 확인됨. 처리 시작.")
+
+    # ── 2. 밀린 날짜 계산 ─────────────────────────────────
+    dates = pending_dates(kb)
+    if not dates:
+        print("ℹ️ 처리할 밀린 날짜가 없습니다 (이미 최신).")
+        return
+    print(f"📋 처리 대상 {len(dates)}일: {dates[0]} ~ {dates[-1]}")
+    if len(dates) > 10:
+        print(f"   ⚠️ 밀린 날짜 {len(dates)}일. 순서대로 모두 처리합니다.")
+
+    # ── 3. 종목 텍스트는 1회만 로드 후 재사용 ─────────────
+    qnet_certs_text = get_qnet_certs_text()
+
+    # ── 4. 과거→현재 순으로 따라잡기 ──────────────────────
+    done, failed = 0, 0
+    for d in dates:
+        try:
+            if process_one_day(d, kb, qnet_certs_text):
+                mark_done(kb, d)
+                done += 1
+            else:
+                failed += 1
+                print(f"  ⏸️ [{d}] 수집 실패로 백필 중단. 다음 실행에서 이어서 처리합니다.")
+                break
+        except Exception as e:
+            print(f"  💥 [{d}] 처리 중 오류: {e}")
+            failed += 1
+            break
+
+    elapsed_total = time.time() - start_time
+    print(f"\n🎉 [종료] 완료 {done}일 / 실패 {failed}일 (소요: {elapsed_total/60:.1f}분)")
+    if failed and not done:
         sys.exit(1)
 
 
