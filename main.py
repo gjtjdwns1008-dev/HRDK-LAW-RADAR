@@ -35,8 +35,9 @@ from report_maker   import (
 )
 
 
-def process_one_day(target_date: str, kb, qnet_certs_text: str) -> bool:
-    """하루치 수집·분석·저장·보고. 반환: 성공 여부(수집 실패 시 False)."""
+def process_one_day(target_date: str, kb, qnet_certs_text: str, run_note: str = "") -> bool:
+    """하루치 수집·분석·저장·보고. 반환: 성공 여부(수집 실패 시 False).
+    run_note: 수동 실행 시 로그에 붙일 접두어 (예: '[수동 6/17 실행] ')."""
     print(f"\n{'='*50}\n📅 [{target_date}] 처리 시작\n{'='*50}")
 
     laws = get_base_laws(api_key=LAW_API_KEY, target_date=target_date)
@@ -50,7 +51,7 @@ def process_one_day(target_date: str, kb, qnet_certs_text: str) -> bool:
         upload_to_google_sheet(
             total_len=0, target_laws=[], target_date=target_date,
             status="🟢 정상 작동 (공포 법령 없음)",
-            log=f"{target_date}: 새로 시행되는 국가 법령이 없습니다.",
+            log=f"{run_note}{target_date}: 새로 시행되는 국가 법령이 없습니다.",
         )
         return True
 
@@ -158,7 +159,7 @@ def process_one_day(target_date: str, kb, qnet_certs_text: str) -> bool:
     ai_fail_count = sum(1 for r in all_results if "AI 분석 최종 실패" in str(r.get("상세 분석결과", "")))
     status_text = "🟡 부분 지연/실패" if ai_fail_count > 0 else "🟢 정상 작동"
     log_text = (
-        f"{target_date}: 총 {len(laws)}건 중 {len(target_laws)}건 매칭. AI실패 {ai_fail_count}건. "
+        f"{run_note}{target_date}: 총 {len(laws)}건 중 {len(target_laws)}건 매칭. AI실패 {ai_fail_count}건. "
         f"기준조항={sum(1 for r in target_laws if r.get('hybrid_status','').startswith('기준조항'))}건, "
         f"직능연={sum(1 for r in target_laws if r.get('hybrid_status')=='직능연_검증')}건, "
         f"신규={sum(1 for r in target_laws if r.get('hybrid_status')=='AI_신규판단')}건"
@@ -207,7 +208,34 @@ def main():
     except Exception as e:
         print(f"  ⚠️ 우대사항 대장 기준선 처리 실패: {e}")
 
-    # ── 1. 오늘이 '되는 날'인지 확인 ──────────────────────
+    # ── [수동 실행 모드] 특정 일자만 처리 (연결 확인보다 먼저 — 대상 날짜를 알아야 함) ──
+    manual_date = os.environ.get("MANUAL_DATE", "").strip()
+    if manual_date:
+        from datetime import datetime, timezone, timedelta
+        run_day = datetime.now(timezone(timedelta(hours=9))).strftime("%Y-%m-%d")
+        if not is_valid_target_date(manual_date):
+            print(f"❌ 잘못된 날짜: '{manual_date}'. YYYYMMDD 형식의 과거(또는 오늘) 날짜여야 합니다.")
+            sys.exit(1)
+        print(f"🔧 [수동 실행] {manual_date} 한 날짜만 처리합니다. (자동 백필 상태는 변경하지 않음)")
+        # 수동 실행도 연결 확인 — 단, 실패해도 '대상 날짜(manual_date)' 행에 기록
+        if not check_law_reachable(LAW_API_KEY):
+            print(f"❌ [수동 실행] 법제처 연결 불가. {manual_date} 처리 실패.")
+            try:
+                upload_to_google_sheet(total_len=0, target_laws=[], target_date=manual_date,
+                    status="🔴 법제처 연결 불가 (IP 차단 추정)",
+                    log=f"[수동 {run_day} 실행] 법제처 연결 실패. 되는 날 재시도 필요.")
+            except Exception:
+                pass
+            sys.exit(1)
+        qnet_certs_text = get_qnet_certs_text()
+        ok = process_one_day(manual_date, kb, qnet_certs_text, run_note=f"[수동 {run_day} 실행] ")
+        # ⚠️ mark_done 호출하지 않음 — 수동 실행이 자동 백필을 꼬이게 하면 안 됨
+        print(f"\n🎉 [수동 실행 종료] {manual_date} 처리 {'성공' if ok else '실패'}")
+        if not ok:
+            sys.exit(1)
+        return
+
+    # ── 1. 오늘이 '되는 날'인지 확인 (자동 실행) ──────────
     if not check_law_reachable(LAW_API_KEY):
         print("❌ 법제처 연결 불가 (오늘은 IP 차단일). 재시도 없이 종료합니다.")
         print("   → 밀린 날짜는 연결되는 다음 날 자동으로 따라잡습니다.")
@@ -221,21 +249,6 @@ def main():
             pass
         sys.exit(1)
     print("✅ 법제처 연결 확인됨. 처리 시작.")
-
-    # ── [수동 실행 모드] 특정 일자만 처리 (백필 상태 건드리지 않음) ──
-    manual_date = os.environ.get("MANUAL_DATE", "").strip()
-    if manual_date:
-        if not is_valid_target_date(manual_date):
-            print(f"❌ 잘못된 날짜: '{manual_date}'. YYYYMMDD 형식의 과거(또는 오늘) 날짜여야 합니다.")
-            sys.exit(1)
-        print(f"🔧 [수동 실행] {manual_date} 한 날짜만 처리합니다. (자동 백필 상태는 변경하지 않음)")
-        qnet_certs_text = get_qnet_certs_text()
-        ok = process_one_day(manual_date, kb, qnet_certs_text)
-        # ⚠️ mark_done 호출하지 않음 — 수동 실행이 자동 백필을 꼬이게 하면 안 됨
-        print(f"\n🎉 [수동 실행 종료] {manual_date} 처리 {'성공' if ok else '실패'}")
-        if not ok:
-            sys.exit(1)
-        return
 
     # ── 2. 밀린 날짜 계산 ─────────────────────────────────
     dates = pending_dates(kb)
