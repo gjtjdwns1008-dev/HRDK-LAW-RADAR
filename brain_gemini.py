@@ -169,11 +169,11 @@ def run_ai_analysis(law, qnet_certs_text, attempt_count=5):
             "Track1_취급유형": data.get("Track1_취급유형", ""),
             "Track1_위험도": data.get("Track1_위험도", ""),
             "Track2_효용코드": data.get("Track2_효용코드", ""),
-            "상세 분석결과": data.get("분석결과_상세", ""),
-            "근거 조문": names_str,
-            "AI 신뢰도": data.get("AI_신뢰도", ""),
-            "검토 필요": data.get("검토필요", "X"),
-            "검토 사유": data.get("검토사유", ""),
+            "상세 분석 결과": data.get("분석결과_상세", ""),
+            "근거조문": names_str,
+            "AI신뢰도": data.get("AI_신뢰도", ""),
+            "검토필요": data.get("검토필요", "X"),
+            "검토사유": data.get("검토사유", ""),
             "조문별 다이렉트 링크": links_str,
         }
 

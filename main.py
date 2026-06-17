@@ -101,7 +101,7 @@ def process_one_day(target_date: str, kb, qnet_certs_text: str, run_note: str = 
             if is_related != "해당없음":
                 print(f"    📞 워크넷 수요 조회 중... ({law_info.get('관련 종목')})")
                 job_demand = get_worknet_job_count(law_info.get("관련 종목", ""), api_key=WORKNET_API_KEY)
-                law_info["워크넷_실시간_구인건수"] = job_demand
+                law_info["워크넷 실시간 구인건수"] = job_demand
                 law_info = verify_with_krivet(law_info, kb)
                 hybrid_tag = {
                     "기준조항_확정": "📌 기준조항", "기준조항_보정": "📌 기준조항(보정)",
@@ -110,7 +110,7 @@ def process_one_day(target_date: str, kb, qnet_certs_text: str, run_note: str = 
                 target_laws.append(law_info)
                 print(f"    ✅ 관련 법령 ({elapsed:.1f}초) [구인:{job_demand}] [{hybrid_tag}]")
             else:
-                law_info["워크넷_실시간_구인건수"] = "-"
+                law_info["워크넷 실시간 구인건수"] = "-"
                 print(f"    ❌ 해당없음 ({elapsed:.1f}초)")
             all_results.append(law_info)
         else:
@@ -128,12 +128,12 @@ def process_one_day(target_date: str, kb, qnet_certs_text: str, run_note: str = 
             if success:
                 if is_related != "해당없음":
                     job_demand = get_worknet_job_count(law_info.get("관련 종목", ""), api_key=WORKNET_API_KEY)
-                    law_info["워크넷_실시간_구인건수"] = job_demand
+                    law_info["워크넷 실시간 구인건수"] = job_demand
                     law_info = verify_with_krivet(law_info, kb)
                     target_laws.append(law_info)
                     print(f"✅ (구인:{job_demand}) [{law_info.get('hybrid_status','')}]")
                 else:
-                    law_info["워크넷_실시간_구인건수"] = "-"
+                    law_info["워크넷 실시간 구인건수"] = "-"
                     print("❌ (해당없음)")
                 all_results.append(law_info)
             else:
@@ -142,7 +142,7 @@ def process_one_day(target_date: str, kb, qnet_certs_text: str, run_note: str = 
                 all_results.append({
                     "시행일자": law["시행일자"], "법령명": law["법령명"],
                     "상세 분석결과": f"AI 분석 최종 실패 (사유: {final_err})",
-                    "연관성_판별": "해당없음", "검토 필요": "O", "워크넷_실시간_구인건수": "-",
+                    "연관성_판별": "해당없음", "검토필요": "O", "워크넷 실시간 구인건수": "-",
                 })
 
     # SQLite 저장
