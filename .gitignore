@@ -1,0 +1,25 @@
+# 민감 정보 (실수로라도 커밋 방지) — Public 레포 안전장치
+*.env
+.env
+.env.*
+credentials.json
+service_account*.json
+*secret*.json
+gcp_*.json
+*.pem
+*.key
+
+# 스크랩 중간 데이터 (분리 구조용 — 클라우드에서만 사용, 커밋 불필요)
+scraped_data/
+
+# 파이썬
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# OS
+.DS_Store
+Thumbs.db
+
