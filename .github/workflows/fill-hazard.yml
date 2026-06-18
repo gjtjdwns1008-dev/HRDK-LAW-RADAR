@@ -1,0 +1,31 @@
+name: "[일회성] 대장 중처법대상 채우기"
+
+on:
+  workflow_dispatch:
+
+jobs:
+  fill-hazard:
+    runs-on: ubuntu-latest
+    steps:
+    - name: 📂 소스 코드 가져오기
+      uses: actions/checkout@v4
+
+    - name: 🐍 파이썬 환경 세팅
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: 📦 필수 라이브러리 설치
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        python -m pip install --upgrade pip
+        git config --global url."https://x-access-token:${GITHUB_TOKEN}@github.com/".insteadOf "https://github.com/"
+        pip install -r requirements.txt
+
+    - name: "🧩 대장 중처법대상 채우기 (일회성)"
+      env:
+        GCP_SERVICE_ACCOUNT_JSON: ${{ secrets.GCP_SERVICE_ACCOUNT_JSON }}
+        GOOGLE_SHEET_URL: ${{ secrets.GOOGLE_SHEET_URL }}
+        DB_PATH: hrdk_law.db
+      run: python scripts/fill_ledger_hazard.py
