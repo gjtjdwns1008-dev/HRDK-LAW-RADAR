@@ -326,6 +326,64 @@ def init_ledger_baseline(kb, resolve_fn=None):
         print(f"  ⚠️ 우대사항 대장 기준선 적재 실패: {e}")
 
 
+def fill_ledger_hazard_column(kb):
+    """
+    [일회성] 대장의 기존 행은 그대로 두고, '중처법대상' 칸만 채웁니다.
+    (법령명+조문)으로 DB(build_ledger_rows)와 매칭하여 '대상'을 표시.
+    기준선이 이미 깔린 뒤 중처법 칸을 추가한 경우 사용. 전체 덮어쓰기 없음.
+    반환: 변경된 행 수.
+    """
+    try:
+        ss = _open_spreadsheet()
+        if ss is None:
+            print("  ⚠️ 스프레드시트 열기 실패")
+            return 0
+        ws = ss.worksheet(LEDGER_SHEET_NAME)
+        records = ws.get_all_values()
+        if len(records) <= 1:
+            print("  ℹ️ 대장에 데이터가 없습니다.")
+            return 0
+        header = records[0]
+        try:
+            law_col = header.index("법령명")
+            art_col = header.index("조문")
+            hazard_col = header.index("중처법대상")
+        except ValueError as e:
+            print(f"  ⚠️ 대장 헤더에 필요한 칸이 없습니다: {e}")
+            print(f"     (현재 헤더: {header})")
+            return 0
+
+        # DB에서 (법령명, 조문) → 중처법대상 매핑 생성
+        rows = kb.build_ledger_rows()
+        hazard_map = {}
+        for r in rows:
+            hazard_map[(r["법령명"], r["조문"])] = r.get("중처법대상", "")
+
+        # 시트 각 행을 매칭해 중처법 칸 업데이트 대상 수집
+        from gspread.utils import rowcol_to_a1
+        updates = []
+        filled = 0
+        for i, row in enumerate(records[1:], start=2):
+            law = row[law_col] if law_col < len(row) else ""
+            art = row[art_col] if art_col < len(row) else ""
+            cur = row[hazard_col] if hazard_col < len(row) else ""
+            want = hazard_map.get((law, art), "")
+            if want and want != cur:
+                cell = rowcol_to_a1(i, hazard_col + 1)
+                updates.append({"range": cell, "values": [[want]]})
+                filled += 1
+
+        if updates:
+            ws.batch_update(updates)
+            print(f"  ✅ 대장 중처법대상 {filled}개 행 채움 완료")
+        else:
+            print("  ℹ️ 채울 중처법대상 행이 없습니다 (이미 채워졌거나 매칭 없음).")
+        return filled
+    except Exception as e:
+        print(f"  ⚠️ 대장 중처법대상 채우기 실패: {e}")
+        return 0
+
+
 def apply_cert_rename_to_ledger(old_name, new_name):
     """
     [명칭 변경 반영 - 방식 B] 대장에서 옛 종목명이 든 '해당 자격종목' 칸만
