@@ -35,12 +35,19 @@ from report_maker   import (
 )
 
 
-def process_one_day(target_date: str, kb, qnet_certs_text: str, run_note: str = "") -> bool:
+def process_one_day(target_date: str, kb, qnet_certs_text: str, run_note: str = "",
+                    prefetched_laws: list | None = None) -> bool:
     """하루치 수집·분석·저장·보고. 반환: 성공 여부(수집 실패 시 False).
-    run_note: 수동 실행 시 로그에 붙일 접두어 (예: '[수동 6/17 실행] ')."""
+    run_note: 수동 실행 시 로그에 붙일 접두어 (예: '[수동 6/17 실행] ').
+    prefetched_laws: 미리 스크랩해둔 법령 리스트. 주어지면 법제처를 재호출하지 않고
+                     이것으로 분석함 (스크랩/분석 분리 모드). None이면 직접 수집."""
     print(f"\n{'='*50}\n📅 [{target_date}] 처리 시작\n{'='*50}")
 
-    laws = get_base_laws(api_key=LAW_API_KEY, target_date=target_date)
+    if prefetched_laws is not None:
+        laws = prefetched_laws
+        print(f"  📂 [{target_date}] 저장된 스크랩 사용 ({len(laws)}건) — 법제처 재호출 안 함")
+    else:
+        laws = get_base_laws(api_key=LAW_API_KEY, target_date=target_date)
 
     if laws is None:
         print(f"  ❌ [{target_date}] 법제처 수집 실패 (다음 기회에 재시도)")
@@ -284,5 +291,111 @@ def main():
         sys.exit(1)
 
 
+def scrape_only():
+    """[스크랩 모드] 법제처에서 밀린 날짜를 수집해 디스크에 JSON 저장만 한다.
+    AI 분석은 하지 않음. 00~06시에 자주 돌려 '한 번 받으면 안 사라지게' 함."""
+    from hrdk_law_core.scrape_store import is_scraped, save_scraped
+    print("🛰️ [스크랩 모드] 법제처 수집 → 디스크 저장\n" + "=" * 50)
+
+    kb = KnowledgeBase(DB_PATH)
+
+    # 연결 확인 (막혔으면 조용히 종료 — 다음 스케줄에 재시도)
+    if not check_law_reachable(LAW_API_KEY):
+        print("❌ 법제처 연결 불가 (IP 차단일 추정). 다음 스케줄에 재시도.")
+        sys.exit(0)  # 실패가 아니라 '아직 안 됨' — exit 0
+    print("✅ 법제처 연결 확인됨.")
+
+    # 분석 대기 중인 날짜 = 백필 대상 (마지막 성공일+1 ~ 어제)
+    dates = pending_dates(kb)
+    if not dates:
+        print("ℹ️ 스크랩할 밀린 날짜가 없습니다.")
+        return
+
+    print(f"📋 스크랩 대상 {len(dates)}일: {dates[0]} ~ {dates[-1]}")
+    scraped, skipped, failed = 0, 0, 0
+    for d in dates:
+        if is_scraped(d):
+            print(f"  ⏭️ [{d}] 이미 스크랩됨 (건너뜀)")
+            skipped += 1
+            continue
+        laws = get_base_laws(api_key=LAW_API_KEY, target_date=d)
+        if laws is None:
+            print(f"  ❌ [{d}] 수집 실패 — 다음 스케줄에 재시도")
+            failed += 1
+            break  # 연결이 끊긴 것일 수 있으니 중단
+        save_scraped(d, laws)
+        print(f"  💾 [{d}] 스크랩 저장 완료 ({len(laws)}건)")
+        scraped += 1
+
+    print(f"\n🎉 [스크랩 종료] 신규 {scraped}일 / 기존 {skipped}일 / 실패 {failed}일")
+
+
+def analyze_only():
+    """[분석 모드] 디스크에 저장된 스크랩을 읽어 AI 분석·저장. 법제처 재호출 없음.
+    06시 이후 1회 실행. 제미나이 재시도 로직(llm_client)이 일시 장애를 흡수함."""
+    from hrdk_law_core.scrape_store import load_scraped, is_scraped
+    print("🧠 [분석 모드] 저장된 스크랩 → AI 분석\n" + "=" * 50)
+
+    kb = KnowledgeBase(DB_PATH)
+    print(f"📚 지식베이스 로드 완료 ({DB_PATH})")
+
+    # 1회 초기화 (별칭·대장) — 분석 모드에서도 필요
+    ensure_alias_sheet_exists()
+    try:
+        from hrdk_law_core.certs import register_alias_overrides
+        overrides = read_alias_overrides_from_sheet()
+        if overrides:
+            register_alias_overrides(overrides)
+            for old_name, new_name in overrides.items():
+                if old_name == new_name:
+                    continue
+                moved = kb.rename_cert_everywhere(old_name, new_name)
+                if moved:
+                    apply_cert_rename_to_ledger(old_name, new_name)
+    except Exception as e:
+        print(f"  ⚠️ 별칭 오버라이드 반영 실패: {e}")
+    try:
+        from hrdk_law_core.certs import resolve_current_name as _resolve
+        init_ledger_baseline(kb, resolve_fn=_resolve)
+    except Exception as e:
+        print(f"  ⚠️ 우대사항 대장 기준선 처리 실패: {e}")
+
+    # 분석할 날짜 = 백필 대상 중 '스크랩이 저장된' 날짜만
+    dates = pending_dates(kb)
+    if not dates:
+        print("ℹ️ 분석할 밀린 날짜가 없습니다.")
+        return
+
+    qnet_certs_text = get_qnet_certs_text()
+    done, failed, no_data = 0, 0, 0
+    for d in dates:
+        laws = load_scraped(d)
+        if laws is None:
+            print(f"  ⏳ [{d}] 스크랩 데이터 없음 — 아직 수집 안 됨 (백필 미완료, 중단)")
+            no_data += 1
+            break  # 순서대로 처리해야 하므로, 스크랩 안 된 날에서 멈춤
+        try:
+            if process_one_day(d, kb, qnet_certs_text, prefetched_laws=laws):
+                mark_done(kb, d)
+                done += 1
+            else:
+                failed += 1
+                print(f"  ⏸️ [{d}] 분석 실패. 다음 실행에서 재시도.")
+                break
+        except Exception as e:
+            print(f"  💥 [{d}] 분석 중 오류: {e}")
+            failed += 1
+            break
+
+    print(f"\n🎉 [분석 종료] 완료 {done}일 / 실패 {failed}일 / 미수집 {no_data}일")
+
+
 if __name__ == "__main__":
-    main()
+    run_mode = os.environ.get("RUN_MODE", "").strip().lower()
+    if run_mode == "scrape":
+        scrape_only()
+    elif run_mode == "analyze":
+        analyze_only()
+    else:
+        # 기본: 기존 통합 동작 (수집+분석 한 번에) — 수동 실행·호환용
+        main()
