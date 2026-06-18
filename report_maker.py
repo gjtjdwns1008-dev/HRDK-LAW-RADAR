@@ -283,7 +283,7 @@ def read_alias_overrides_from_sheet():
 LEDGER_SHEET_NAME = "우대사항_대장"
 LEDGER_HEADERS = ["법령명", "조문", "우대분류", "해당 자격종목",
                   "Track1_취급유형", "Track1_위험도", "Track2_효용코드",
-                  "상태", "최근변경일", "비고"]
+                  "중처법대상", "상태", "최근변경일", "비고"]
 
 
 def _open_spreadsheet():
