@@ -258,7 +258,17 @@ def main():
     print("✅ 법제처 연결 확인됨. 처리 시작.")
 
     # ── 2. 밀린 날짜 계산 ─────────────────────────────────
-    dates = pending_dates(kb)
+    # SQLite는 GitHub Actions에서 휘발되므로, 영구 저장소인 구글시트(총괄현황표)에서
+    # 마지막 성공일을 읽어 이미 처리한 날짜를 다시 분석하지 않도록 함.
+    last_ok = ""
+    try:
+        from hrdk_law_core.sheets import read_last_success_date
+        last_ok = read_last_success_date(GCP_SERVICE_ACCOUNT_JSON, GOOGLE_SHEET_URL)
+        if last_ok:
+            print(f"📌 시트 기준 마지막 성공일: {last_ok}")
+    except Exception as e:
+        print(f"  ⚠️ 시트에서 마지막 성공일 읽기 실패(무시하고 진행): {e}")
+    dates = pending_dates(kb, last_success_override=last_ok or None)
     if not dates:
         print("ℹ️ 처리할 밀린 날짜가 없습니다 (이미 최신).")
         return
