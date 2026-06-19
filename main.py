@@ -248,10 +248,12 @@ def main():
         print("   → 밀린 날짜는 연결되는 다음 날 자동으로 따라잡습니다.")
         try:
             from datetime import datetime, timezone, timedelta
-            today_kst = datetime.now(timezone(timedelta(hours=9))).strftime("%Y%m%d")
-            upload_to_google_sheet(total_len=0, target_laws=[], target_date=today_kst,
+            # 🔑 실패 기록도 '처리하려던 시행일자(=어제)' 행에 남긴다 (자동=실행일−1).
+            #    성공했을 때와 같은 행에 모여, '오늘' 빈 행이 따로 안 생김.
+            target_efyd = (datetime.now(timezone(timedelta(hours=9))) - timedelta(days=1)).strftime("%Y%m%d")
+            upload_to_google_sheet(total_len=0, target_laws=[], target_date=target_efyd,
                 status="🔴 법제처 연결 불가 (IP 차단 추정)",
-                log="오늘은 연결 실패. 밀린 날짜는 다음 연결일에 백필됩니다.")
+                log="연결 실패(해당 시행일자 처리 대기). 밀린 날짜는 다음 연결일에 백필됩니다.")
         except Exception:
             pass
         sys.exit(1)
