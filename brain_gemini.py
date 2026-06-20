@@ -2,6 +2,27 @@ import json
 import re
 from hrdk_law_core.llm_client import get_llm_client
 
+
+def _normalize_relevance(raw: str) -> str:
+    """AI가 뱉은 연관성_판별 값을 3개 정식값으로 교정.
+    정식값: 연관높음 / 단순관련 / 해당없음
+    (AI가 가끔 '해음', '해해당없음'처럼 글자를 빠뜨리거나 중복하는 디코딩 오류 대응)
+    """
+    if not raw:
+        return "해당없음"
+    s = str(raw).strip().replace(" ", "")
+    if s in ("연관높음", "단순관련", "해당없음"):
+        return s
+    # 우선순위: 구체적인 것부터 (연관높음 > 단순관련 > 해당없음)
+    if "연관" in s or "높" in s:
+        return "연관높음"
+    if "단순" in s or "관련" in s:
+        return "단순관련"
+    if "해당" in s or "없" in s or s.startswith("해"):
+        return "해당없음"
+    return "해당없음"  # 못 알아보면 안전하게 해당없음
+
+
 # 🌟 [모델 추상화] Gemini를 직접 부르지 않고 "통역 창구"를 통해 호출합니다.
 # 환경변수 LLM_PROVIDER로 모델을 바꿀 수 있습니다. (기본: gemini)
 _llm = None
@@ -218,7 +239,7 @@ def run_ai_analysis(law, qnet_certs_text, attempt_count=5):
             "시행일자": law["시행일자"],
             "소관부처": law.get("소관부처", ""),
             "법령명": law["법령명"],
-            "연관성_판별": data.get("연관성_판별", "해당없음"),
+            "연관성_판별": _normalize_relevance(data.get("연관성_판별", "해당없음")),
             "관련 종목": data.get("종목", ""),
             "조문 요약": data.get("요약", ""),
             "우대분류": data.get("우대분류", "기타"),
@@ -234,7 +255,7 @@ def run_ai_analysis(law, qnet_certs_text, attempt_count=5):
             "조문별 다이렉트 링크": links_str,
         }
 
-        return True, data.get("연관성_판별", "해당없음"), law_info
+        return True, _normalize_relevance(data.get("연관성_판별", "해당없음")), law_info
 
     except Exception as e:
         return False, "", {"error": str(e)}
