@@ -8,7 +8,7 @@ requests>=2.31.0
 urllib3>=2.0.0
 google-genai
 openpyxl>=3.1.2
-gspread>=5.12.0
+gspread>=5.12.0,<7
 oauth2client>=4.1.3
 
 # ── HRDK 공유 코어 ────────────────────────────────────────────
