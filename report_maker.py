@@ -121,7 +121,7 @@ def upload_to_google_sheet(total_len, target_laws, target_date=TARGET_DATE, stat
                         row_data = _row_for_sheet(info, COLUMNS)
                         
                         # 🌟 하드코딩(A~O)을 유연한 계산식(A~Q)으로 변경하여 워크넷 데이터 누락 방지!
-                        ws_main.update(f'A{row_idx}:{end_col_letter}{row_idx}', [row_data]) 
+                        ws_main.update(range_name=f'A{row_idx}:{end_col_letter}{row_idx}', values=[row_data]) 
                         print(f"  🔄 [Update] {existing_id}")
                     else:
                         # Insert
