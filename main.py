@@ -224,15 +224,10 @@ def main():
             print(f"❌ 잘못된 날짜: '{manual_date}'. YYYYMMDD 형식의 과거(또는 오늘) 날짜여야 합니다.")
             sys.exit(1)
         print(f"🔧 [수동 실행] {manual_date} 한 날짜만 처리합니다. (자동 백필 상태는 변경하지 않음)")
-        # 수동 실행도 연결 확인 — 단, 실패해도 '대상 날짜(manual_date)' 행에 기록
+        # 수동 실행도 연결 확인 — 실패 시 시트를 건드리지 않고 종료(기존 🟢 숫자 0 덮어쓰기 방지)
         if not check_law_reachable(LAW_API_KEY):
-            print(f"❌ [수동 실행] 법제처 연결 불가. {manual_date} 처리 실패.")
-            try:
-                upload_to_google_sheet(total_len=0, target_laws=[], target_date=manual_date,
-                    status="🔴 법제처 연결 불가 (IP 차단 추정)",
-                    log="[수동 실행] 법제처 연결 실패. 되는 날 재시도 필요.")
-            except Exception:
-                pass
+            print(f"❌ [수동 실행] 법제처 연결 불가. {manual_date} 처리 실패. (시트는 변경하지 않음)")
+            print("   → 연결되는 날 다시 실행하세요. 기존 분석 결과는 보존됩니다.")
             sys.exit(1)
         qnet_certs_text = get_qnet_certs_text()
         ok = process_one_day(manual_date, kb, qnet_certs_text, run_note="[수동 실행] ")
@@ -249,24 +244,17 @@ def main():
         from datetime import datetime, timezone, timedelta
         # 처리하려던 시행일자(=어제). 자동 실행은 '실행일 −1'.
         target_efyd = (datetime.now(timezone(timedelta(hours=9))) - timedelta(days=1)).strftime("%Y%m%d")
-        # 🔑 이미 처리(성공)한 시행일자면 실패(🔴) 기록을 남기지 않는다.
-        #    (이미 🟢인 날에 연결 실패 🔴가 계속 덧붙는 것을 방지)
+        # 🔑 연결 실패 시엔 시트에 0을 쓰지 않는다(기존 🟢 숫자 덮어쓰기 방지).
+        #    이미 처리한 날이면 어차피 재처리 불필요, 아직 안 한 날이면 다음 연결일에 백필됨.
         try:
             from hrdk_law_core.sheets import read_last_success_date
             last_ok = read_last_success_date(GCP_SERVICE_ACCOUNT_JSON, GOOGLE_SHEET_URL)
             if last_ok and last_ok >= target_efyd:
-                print(f"ℹ️ {target_efyd}는 이미 처리 완료(마지막 성공일 {last_ok}) → 실패 기록 생략하고 종료.")
-                sys.exit(0)  # 처리할 게 없으므로 '실패'가 아님 → exit 0
-        except Exception:
-            pass  # 확인 실패 시엔 아래에서 평소대로 기록
-        # 🌟 아직 처리 안 된 시행일자만 연결 실패 이력 기록 (어제 행에 누적)
-        try:
-            upload_to_google_sheet(total_len=0, target_laws=[], target_date=target_efyd,
-                status="🔴 법제처 연결 불가 (IP 차단 추정)",
-                log="연결 실패(해당 시행일자 처리 대기). 밀린 날짜는 다음 연결일에 백필됩니다.")
-        except Exception:
-            pass
-        sys.exit(1)
+                print(f"ℹ️ {target_efyd}는 이미 처리 완료(마지막 성공일 {last_ok}).")
+        except Exception as e:
+            print(f"ℹ️ 마지막 성공일 확인 불가({str(e)[:40]}) — 시트는 건드리지 않고 종료.")
+        print("   → 밀린 날짜는 연결되는 다음 날 자동으로 따라잡습니다. (총괄현황표 변경 없음)")
+        sys.exit(0)
     print("✅ 법제처 연결 확인됨. 처리 시작.")
 
     # ── 2. 밀린 날짜 계산 ─────────────────────────────────
