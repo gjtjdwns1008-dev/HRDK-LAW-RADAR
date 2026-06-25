@@ -21,7 +21,7 @@ from config import (
 )
 
 from hrdk_law_core.scraper  import get_base_laws
-from hrdk_law_core.certs    import get_qnet_certs_text, get_relevant_certs_text, detect_name_change_signal
+from hrdk_law_core.certs    import get_qnet_certs_text, get_relevant_certs_text, detect_name_change_signal, normalize_cert_string
 from hrdk_law_core.worknet  import get_worknet_job_count
 from hrdk_law_core.db       import KnowledgeBase
 from hrdk_law_core.hybrid   import verify_with_krivet
@@ -105,6 +105,14 @@ def process_one_day(target_date: str, kb, qnet_certs_text: str, run_note: str = 
                 pass
 
         if success:
+            # 종목 사전 정규화: AI 종목을 541종목 사전의 정식명만 남김(범주형/오타 제외)
+            if is_related != "해당없음":
+                _std, _dropped = normalize_cert_string(law_info.get("관련 종목", ""))
+                law_info["관련 종목"] = _std
+                if _dropped:
+                    _note = f"사전에 없어 제외된 종목 표현: {', '.join(_dropped)}"
+                    law_info["검토사유"] = (str(law_info.get("검토사유", "")).strip() + " / " + _note).strip(" /")
+                    law_info["검토필요"] = "O"
             if is_related != "해당없음":
                 print(f"    📞 워크넷 수요 조회 중... ({law_info.get('관련 종목')})")
                 job_demand = get_worknet_job_count(law_info.get("관련 종목", ""), api_key=WORKNET_API_KEY)
@@ -134,6 +142,12 @@ def process_one_day(target_date: str, kb, qnet_certs_text: str, run_note: str = 
             success, is_related, law_info = run_ai_analysis(law, get_relevant_certs_text(law.get("원본", "")), attempt_count=3)
             if success:
                 if is_related != "해당없음":
+                    _std, _dropped = normalize_cert_string(law_info.get("관련 종목", ""))
+                    law_info["관련 종목"] = _std
+                    if _dropped:
+                        _note = f"사전에 없어 제외된 종목 표현: {', '.join(_dropped)}"
+                        law_info["검토사유"] = (str(law_info.get("검토사유", "")).strip() + " / " + _note).strip(" /")
+                        law_info["검토필요"] = "O"
                     job_demand = get_worknet_job_count(law_info.get("관련 종목", ""), api_key=WORKNET_API_KEY)
                     law_info["워크넷 실시간 구인건수"] = job_demand
                     law_info = verify_with_krivet(law_info, kb)
