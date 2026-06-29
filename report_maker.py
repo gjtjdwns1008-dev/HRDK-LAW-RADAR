@@ -203,8 +203,8 @@ def export_held_laws_to_sheet(kb):
 # 1-C. 별칭사전 탭 읽기 (담당자가 편집, 코드는 읽기만)
 # ==========================================
 ALIAS_SHEET_NAME = "자격명칭_별칭사전"
-# 머리말(헤더): 앞 4개는 코드가 읽는 필수 / 뒤 3개는 담당자 관리용
-ALIAS_HEADERS = ["구명칭", "현행명칭_2026", "등급", "직무", "등록일", "등록자", "비고"]
+# 머리말(헤더): 앞 2개는 코드가 읽는 필수(구명칭/현행명칭), 변경시점은 발효관리용, 뒤는 담당자 관리용
+ALIAS_HEADERS = ["구명칭", "현행명칭", "변경시점", "등급", "직무", "등록자", "비고"]
 
 
 def ensure_alias_sheet_exists():
@@ -225,8 +225,8 @@ def ensure_alias_sheet_exists():
             # 🌟 예시 행 추가 — 담당자가 입력 형식을 헷갈리지 않도록.
             # 구명칭이 '[예시]'로 시작하면 코드가 데이터로 읽지 않고 건너뜁니다.
             ws.append_row([
-                "[예시] 전자계산기조직응용기사", "정보처리기사", "기사", "정보기술",
-                "2026-07-01", "홍길동", "← 이 줄은 작성 예시입니다. 지우지 말고 아래에 추가하세요.",
+                "[예시] 전자계산기조직응용기사", "정보처리기사", "2027-01-01", "기사", "정보기술",
+                "홍길동", "← 이 줄은 작성 예시입니다. 지우지 말고 아래에 추가하세요.",
             ])
             print(f"  ✅ '{ALIAS_SHEET_NAME}' 탭 생성 (헤더 + 예시 행 포함)")
     except Exception as e:
@@ -258,7 +258,7 @@ def read_alias_overrides_from_sheet():
         skipped_example = 0
         for r in ws.get_all_records():   # 1행(헤더)은 자동 제외됨
             old = str(r.get("구명칭", "")).strip()
-            new = str(r.get("현행명칭_2026", "")).strip()
+            new = str(r.get("현행명칭") or r.get("현행명칭_2026") or "").strip()
             # 예시 행 건너뛰기
             if old.startswith("[예시]"):
                 skipped_example += 1
