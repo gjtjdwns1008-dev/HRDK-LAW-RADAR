@@ -43,6 +43,12 @@ def process_one_day(target_date: str, kb, qnet_certs_text: str, run_note: str = 
                      이것으로 분석함 (스크랩/분석 분리 모드). None이면 직접 수집."""
     print(f"\n{'='*50}\n📅 [{target_date}] 처리 시작\n{'='*50}")
 
+    # 종목 명단 기준 연도 = 이 법령의 시행일자 연도 (B안). 연도별 csv 자동 선택에 사용.
+    _cert_year = None
+    _digits = "".join(ch for ch in str(target_date or "") if ch.isdigit())
+    if len(_digits) >= 4:
+        _cert_year = int(_digits[:4])
+
     if prefetched_laws is not None:
         laws = prefetched_laws
         print(f"  📂 [{target_date}] 저장된 스크랩 사용 ({len(laws)}건) — 법제처 재호출 안 함")
@@ -88,7 +94,7 @@ def process_one_day(target_date: str, kb, qnet_certs_text: str, run_note: str = 
             })
             continue
 
-        success, is_related, law_info = run_ai_analysis(law, get_relevant_certs_text(law.get("원본", "")))
+        success, is_related, law_info = run_ai_analysis(law, get_relevant_certs_text(law.get("원본", ""), year=_cert_year))
         elapsed = time.time() - t0
 
         # 🌟 [B 알림] 자격 명칭 변경 의심 감지
@@ -107,7 +113,7 @@ def process_one_day(target_date: str, kb, qnet_certs_text: str, run_note: str = 
         if success:
             # 종목 사전 정규화: AI 종목을 541종목 사전의 정식명만 남김(범주형/오타 제외)
             if is_related != "해당없음":
-                _std, _dropped = normalize_cert_string(law_info.get("관련 종목", ""))
+                _std, _dropped = normalize_cert_string(law_info.get("관련 종목", ""), year=_cert_year)
                 law_info["관련 종목"] = _std
                 if _dropped:
                     _note = f"사전에 없어 제외된 종목 표현: {', '.join(_dropped)}"
@@ -139,10 +145,10 @@ def process_one_day(target_date: str, kb, qnet_certs_text: str, run_note: str = 
         time.sleep(20)
         for law in failed_queue:
             print(f"  [재시도] {law['법령명']}... ", end="", flush=True)
-            success, is_related, law_info = run_ai_analysis(law, get_relevant_certs_text(law.get("원본", "")), attempt_count=3)
+            success, is_related, law_info = run_ai_analysis(law, get_relevant_certs_text(law.get("원본", ""), year=_cert_year), attempt_count=3)
             if success:
                 if is_related != "해당없음":
-                    _std, _dropped = normalize_cert_string(law_info.get("관련 종목", ""))
+                    _std, _dropped = normalize_cert_string(law_info.get("관련 종목", ""), year=_cert_year)
                     law_info["관련 종목"] = _std
                     if _dropped:
                         _note = f"사전에 없어 제외된 종목 표현: {', '.join(_dropped)}"
