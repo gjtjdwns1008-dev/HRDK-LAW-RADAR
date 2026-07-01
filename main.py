@@ -30,9 +30,61 @@ from hrdk_law_core.backfill import check_law_reachable, pending_dates, mark_done
 from brain_gemini   import run_ai_analysis
 from report_maker   import (
     upload_to_google_sheet, create_excel_report, send_webhook_with_file,
-    export_held_laws_to_sheet, ensure_alias_sheet_exists, read_alias_overrides_from_sheet,
+    export_held_laws_to_sheet, ensure_update_sheet_exists, read_update_instructions,
+    mark_update_applied, apply_name_updates_to_ledger,
     init_ledger_baseline, apply_cert_rename_to_ledger,
 )
+
+
+def run_name_updates(kb):
+    """
+    '자격명칭최신화' 탭의 미적용·발효 지시를 읽어 대장(관련법령 탭)의 종목명을 교체한다.
+      · 오직 '명칭 교체'만 (구명칭→신명칭). 자격 폐지/통합이라도 자격은 유효하므로 삭제하지 않음.
+      · 교체 후 같은 칸 내 중복은 하나만 남김.
+      · SQLite 지식베이스의 종목명도 함께 교체(rename_cert_everywhere)
+      · 처리한 지시는 적용여부=완료 로 표시(1회성 실행 보장)
+    환경변수 NAME_UPDATE_PREVIEW=1 이면 미리보기만(시트 수정 안 함).
+    """
+    import os as _os, json as _json, gspread as _gspread
+    from oauth2client.service_account import ServiceAccountCredentials as _SAC
+    from hrdk_law_core.certs import _normalize_cert as _N
+
+    instrs = read_update_instructions()
+    if not instrs:
+        return
+    preview = _os.environ.get("NAME_UPDATE_PREVIEW", "").strip() in ("1", "true", "True")
+
+    rename_map, row_nums = {}, []
+    for row_num, gu, sin in instrs:
+        row_nums.append(row_num)
+        rename_map[_N(gu)] = sin
+
+    print(f"  🔤 자격명칭최신화: 적용할 명칭변경 {len(instrs)}건"
+          + ("  [미리보기]" if preview else ""))
+
+    creds_dict = _json.loads(GCP_SERVICE_ACCOUNT_JSON.strip(), strict=False)
+    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+    creds = _SAC.from_json_keyfile_dict(creds_dict, scope)
+    ss = _gspread.authorize(creds).open_by_key(GOOGLE_SHEET_URL)
+
+    n, preview_list = apply_name_updates_to_ledger(
+        ss, "국가기술자격 관련법령", "관련 종목", rename_map, preview=preview)
+    print(f"    • 관련법령 탭: {n}개 행 변경" + (" (미리보기)" if preview else ""))
+    for rn, old, new in preview_list[:8]:
+        print(f"        행{rn}: {old[:34]} → {new[:34]}")
+    if len(preview_list) > 8:
+        print(f"        ... 외 {len(preview_list)-8}행")
+
+    if not preview:
+        for row_num, gu, sin in instrs:
+            try:
+                moved = kb.rename_cert_everywhere(gu, sin)
+                if moved:
+                    print(f"    • SQLite: {gu} → {sin} ({moved}건)")
+            except Exception:
+                pass
+        mark_update_applied(row_nums)
+        print(f"    • 지시 {len(row_nums)}건 '완료' 표시")
 
 
 def process_one_day(target_date: str, kb, qnet_certs_text: str, run_note: str = "",
@@ -210,23 +262,15 @@ def main():
     kb = KnowledgeBase(DB_PATH)
     print(f"📚 지식베이스 로드 완료 ({DB_PATH})")
 
-    # ── [1회 초기화] 별칭사전 + 명칭변경 양쪽 반영 ────────
-    ensure_alias_sheet_exists()
+    # ── [매 실행] 자격명칭최신화: 자격 명칭변경을 대장에 반영 ────────
+    #    · '자격명칭최신화' 탭의 미적용 + 발효(변경시점 지남) 지시만 처리
+    #    · 명칭 교체만(구명칭→신명칭). 폐지/통합이어도 자격은 유효하므로 삭제하지 않음
+    #    · 교체 후 같은 칸 내 중복 제거. 처리한 지시는 적용여부=완료 표시(1회성)
+    ensure_update_sheet_exists()
     try:
-        from hrdk_law_core.certs import register_alias_overrides
-        overrides = read_alias_overrides_from_sheet()
-        if overrides:
-            register_alias_overrides(overrides)
-            print(f"  🔤 담당자 추가 별칭 {len(overrides)}건 반영")
-            for old_name, new_name in overrides.items():
-                if old_name == new_name:
-                    continue
-                moved = kb.rename_cert_everywhere(old_name, new_name)
-                if moved:
-                    print(f"    • SQLite: {old_name} → {new_name} ({moved}건)")
-                    apply_cert_rename_to_ledger(old_name, new_name)
+        run_name_updates(kb)
     except Exception as e:
-        print(f"  ⚠️ 별칭 오버라이드 반영 실패: {e}")
+        print(f"  ⚠️ 자격명칭최신화 처리 실패: {e}")
 
     # ── [1회 초기화] 우대사항 대장 기준선 ─────────────────
     try:
@@ -369,21 +413,12 @@ def analyze_only():
     kb = KnowledgeBase(DB_PATH)
     print(f"📚 지식베이스 로드 완료 ({DB_PATH})")
 
-    # 1회 초기화 (별칭·대장) — 분석 모드에서도 필요
-    ensure_alias_sheet_exists()
+    # 1회 초기화 (자격명칭최신화·대장) — 분석 모드에서도 필요
+    ensure_update_sheet_exists()
     try:
-        from hrdk_law_core.certs import register_alias_overrides
-        overrides = read_alias_overrides_from_sheet()
-        if overrides:
-            register_alias_overrides(overrides)
-            for old_name, new_name in overrides.items():
-                if old_name == new_name:
-                    continue
-                moved = kb.rename_cert_everywhere(old_name, new_name)
-                if moved:
-                    apply_cert_rename_to_ledger(old_name, new_name)
+        run_name_updates(kb)
     except Exception as e:
-        print(f"  ⚠️ 별칭 오버라이드 반영 실패: {e}")
+        print(f"  ⚠️ 자격명칭최신화 처리 실패: {e}")
     try:
         from hrdk_law_core.certs import resolve_current_name as _resolve
         init_ledger_baseline(kb, resolve_fn=_resolve)
