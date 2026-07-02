@@ -31,7 +31,7 @@ from brain_gemini   import run_ai_analysis
 from report_maker   import (
     upload_to_google_sheet, create_excel_report, send_webhook_with_file,
     export_held_laws_to_sheet, ensure_update_sheet_exists, read_update_instructions,
-    mark_update_applied, apply_name_updates_to_ledger,
+    mark_update_applied, apply_name_updates_to_ledger, read_all_aliases_for_resolve,
     init_ledger_baseline, apply_cert_rename_to_ledger,
 )
 
@@ -48,7 +48,19 @@ def run_name_updates(kb):
     import os as _os, json as _json, gspread as _gspread
     from oauth2client.service_account import ServiceAccountCredentials as _SAC
     from hrdk_law_core.certs import _normalize_cert as _N
+    from hrdk_law_core.certs import register_alias_overrides
 
+    # (A) 분석 변환용: 자격명칭최신화 탭의 모든 발효 별칭(완료 포함)을 core에 주입.
+    #     → 이 실행의 새 법령 분석에서 resolve_current_name이 구명칭을 현행명으로 변환.
+    try:
+        aliases = read_all_aliases_for_resolve()
+        if aliases:
+            register_alias_overrides(aliases)
+            print(f"  🔤 분석 변환용 별칭 {len(aliases)}건 주입")
+    except Exception as e:
+        print(f"  ⚠️ 별칭 주입 실패: {e}")
+
+    # (B) 대장 소급 수정용: 미적용 + 발효된 명칭변경만
     instrs = read_update_instructions()
     if not instrs:
         return

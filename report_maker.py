@@ -243,6 +243,54 @@ def ensure_update_sheet_exists():
         print(f"  ⚠️ 자격명칭최신화 탭 확인 실패: {e}")
 
 
+def read_all_aliases_for_resolve():
+    """
+    자격명칭최신화 탭에서 '분석 변환용' 별칭을 전부 읽어옵니다({구명칭: 신명칭}).
+      · 대장 수정용(read_update_instructions)과 달리, 적용여부=완료 인 것도 포함.
+        (과거 265개 이관분은 완료지만, 새 법령이 옛 명칭을 쓰면 변환해야 하므로 계속 사용)
+      · 변경시점이 미래인 것만 제외(아직 발효 전 명칭변경은 변환에도 반영 안 함)
+      · 예시행([예시]/구분줄 위쪽)은 건너뜀
+    """
+    if not GCP_SERVICE_ACCOUNT_JSON or not GOOGLE_SHEET_URL:
+        return {}
+    try:
+        creds_dict = json.loads(GCP_SERVICE_ACCOUNT_JSON.strip(), strict=False)
+        scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+        client = gspread.authorize(creds)
+        ws = client.open_by_key(GOOGLE_SHEET_URL).worksheet(UPDATE_SHEET_NAME)
+        values = ws.get_all_values()
+        if len(values) <= 1:
+            return {}
+        header = values[0]
+        idx = {h: i for i, h in enumerate(header)}
+        def cell(row, name):
+            i = idx.get(name)
+            return (row[i].strip() if (i is not None and i < len(row)) else "")
+        start = 1
+        for r_i, row in enumerate(values[1:], start=1):
+            gu = cell(row, "구명칭"); bigo = cell(row, "비고")
+            if gu.startswith("[예시]") or "실제 입력은" in bigo or "═══" in bigo:
+                start = r_i + 1
+        today_digits = datetime.now(timezone(timedelta(hours=9))).strftime("%Y%m%d")
+        out = {}
+        for r_i in range(start, len(values)):
+            row = values[r_i]
+            gu = cell(row, "구명칭"); sin = cell(row, "신명칭"); when = cell(row, "변경시점")
+            if not gu or not sin or gu == sin:
+                continue
+            wd = "".join(ch for ch in when if ch.isdigit())[:8]
+            if wd and len(wd) == 8 and wd > today_digits:  # 미래 발효분은 변환에도 아직 미반영
+                continue
+            out[gu] = sin
+        return out
+    except gspread.WorksheetNotFound:
+        return {}
+    except Exception as e:
+        print(f"  ⚠️ 자격명칭최신화(변환용) 읽기 실패: {e}")
+        return {}
+
+
 def read_update_instructions():
     """
     자격명칭최신화 탭에서 '실제 적용할 명칭변경 지시'만 읽어옵니다.
